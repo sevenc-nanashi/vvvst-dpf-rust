@@ -23,5 +23,7 @@ _deps
 
 # Added by cargo
 
+.vs
 /build
+/out
 /target

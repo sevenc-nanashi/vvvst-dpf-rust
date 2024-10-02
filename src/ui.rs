@@ -25,6 +25,12 @@ impl PluginUiImpl {
         let (sender, receiver) = std::sync::mpsc::channel();
         plugin.receiver = Some(receiver);
 
+        if cfg!(debug_assertions) {
+            window.load_url(option_env!("VVVST_DEV_SERVER_URL").unwrap_or("http://localhost:5173")).unwrap();
+        } else {
+            window.load_url("app://.").unwrap();
+        }
+
         PluginUiImpl {
             raw_window_handle,
             window,
