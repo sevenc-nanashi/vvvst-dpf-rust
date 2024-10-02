@@ -1,0 +1,15 @@
+language = "C++"
+namespace = "Rust"
+
+header = """
+#pragma once
+#ifdef WIN32
+#define EXPORT __declspec(dllexport)
+#else
+#define EXPORT
+#endif
+"""
+
+[fn]
+prefix = "EXPORT"
+
