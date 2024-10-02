@@ -29,3 +29,6 @@ _deps
 /target
 /logs/*
 !/logs/.gitkeep
+
+/resources/editor/*
+!/resources/editor/.gitkeep

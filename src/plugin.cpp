@@ -40,7 +40,7 @@ const char *VvvstPlugin::getHomePage() const {
    Get the plugin license name (a single line of text).
    For commercial plugins this should return some short copyright information.
  */
-const char *VvvstPlugin::getLicense() const { return "MIT"; }
+const char *VvvstPlugin::getLicense() const { return "LGPLv3"; }
 
 /**
    Get the plugin version, in hexadecimal.

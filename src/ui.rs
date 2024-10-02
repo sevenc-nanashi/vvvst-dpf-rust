@@ -18,10 +18,10 @@ pub struct PluginUiImpl {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", tag = "type", content = "payload")]
 pub enum UiNotification {
     UpdatePlayingState(bool),
-    UpdatePlayingPosition(f32),
+    UpdatePosition(f32),
 }
 
 impl PluginUiImpl {
@@ -131,6 +131,14 @@ impl PluginUiImpl {
     pub fn idle(&mut self) {
         while let Ok(message) = self.response_receiver.try_recv() {
             let js = PluginUiImpl::response_to_js(&message);
+            self.window.evaluate_script(&js).unwrap();
+        }
+
+        if let Ok(notification) = self.notification_receiver.try_recv() {
+            let js = format!(
+                r#"window.onIpcNotification({})"#,
+                serde_json::to_string(&notification).unwrap()
+            );
             self.window.evaluate_script(&js).unwrap();
         }
     }
@@ -329,9 +337,8 @@ impl PluginUiImpl {
 
     fn response_to_js(response: &Response) -> String {
         let response = serde_json::to_string(response).unwrap();
-        let response = serde_json::to_string(&response).unwrap();
 
-        format!(r#"window.onIpcMessage({})"#, response)
+        format!(r#"window.onIpcResponse({})"#, response)
     }
 }
 

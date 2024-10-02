@@ -16,11 +16,13 @@ pub struct PluginImpl {
 
     pub params: Arc<RwLock<PluginParams>>,
     pub mix: Arc<RwLock<Mixes>>,
+
+    prev_position: usize,
+    prev_is_playing: bool,
 }
 impl std::fmt::Debug for PluginImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PluginImpl")
-            .finish()
+        f.debug_struct("PluginImpl").finish()
     }
 }
 
@@ -106,6 +108,9 @@ impl PluginImpl {
             notification_sender: None,
             params: Arc::new(RwLock::new(params)),
             mix: Arc::new(RwLock::new(Mixes::default())),
+
+            prev_position: 0,
+            prev_is_playing: false,
         }
     }
 
@@ -192,7 +197,7 @@ impl PluginImpl {
         is_playing: bool,
         current_sample: usize,
     ) {
-        if let Ok(this) = this_ref.try_lock() {
+        if let Ok(mut this) = this_ref.try_lock() {
             if let Ok(mix) = this.mix.try_read() {
                 let samples = &mix.samples;
                 if samples.is_empty() {
@@ -209,10 +214,7 @@ impl PluginImpl {
                     });
                     return;
                 }
-                if !is_playing {
-                    return;
-                }
-
+                if is_playing {
                 for i in 0..outputs[0].len() {
                     let current_frame = current_sample + i;
                     if current_frame < samples.len() {
@@ -222,6 +224,22 @@ impl PluginImpl {
                         outputs[0][i] = 0.0;
                         outputs[1][i] = 0.0;
                     }
+                }
+                }
+            }
+
+            if this.prev_position != current_sample {
+                this.prev_position = current_sample;
+                if let Some(sender) = &this.notification_sender {
+                    let _ = sender.send(UiNotification::UpdatePosition(
+                        (current_sample as f32) / sample_rate,
+                    ));
+                }
+            }
+            if this.prev_is_playing != is_playing {
+                this.prev_is_playing = is_playing;
+                if let Some(sender) = &this.notification_sender {
+                    let _ = sender.send(UiNotification::UpdatePlayingState(is_playing));
                 }
             }
         }
