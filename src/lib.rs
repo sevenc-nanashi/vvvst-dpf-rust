@@ -46,10 +46,34 @@ unsafe extern "C" fn get_plugin_name() -> *const std::os::raw::c_char {
 }
 
 #[no_mangle]
+unsafe extern "C" fn cstring_drop(s: *mut std::os::raw::c_char) {
+    if s.is_null() {
+        return;
+    }
+
+    let _ = std::ffi::CString::from_raw(s);
+}
+
+#[no_mangle]
 unsafe extern "C" fn plugin_new() -> *mut Plugin {
     Box::into_raw(Box::new(Plugin {
-        inner: Arc::new(Mutex::new(plugin::PluginImpl::new())),
+        inner: Arc::new(Mutex::new(plugin::PluginImpl::new(Default::default()))),
     }))
+}
+
+#[no_mangle]
+unsafe extern "C" fn plugin_set_state(plugin: &Plugin, state: *const std::ffi::c_char) {
+    let plugin = RUNTIME.block_on(plugin.inner.lock());
+    let state = std::ffi::CStr::from_ptr(state).to_str().unwrap();
+    RUNTIME.block_on(plugin.set_state(state));
+}
+
+#[no_mangle]
+unsafe extern "C" fn plugin_get_state(plugin: &Plugin) -> *mut std::os::raw::c_char {
+    let plugin = RUNTIME.block_on(plugin.inner.lock());
+    let state = RUNTIME.block_on(plugin.get_state());
+    let state = std::ffi::CString::new(state).unwrap();
+    state.into_raw()
 }
 
 #[no_mangle]

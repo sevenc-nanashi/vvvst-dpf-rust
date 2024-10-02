@@ -1,5 +1,6 @@
 
 #include "plugin.hpp"
+#include "DistrhoDetails.hpp"
 #include "DistrhoPlugin.hpp"
 #include "rust.generated.hpp"
 // -----------------------------------------------------------------------------------------------------------
@@ -65,9 +66,21 @@ void VvvstPlugin::initAudioPort(bool input, uint32_t index, AudioPort &port) {
   Plugin::initAudioPort(input, index, port);
 }
 
-void VvvstPlugin::initState(uint32_t index, State &state) {}
-void VvvstPlugin::setState(const char *key, const char *value) {}
-String VvvstPlugin::getState(const char *key) const { return String(); }
+void VvvstPlugin::initState(uint32_t index, State &state) {
+  state.defaultValue = "";
+  state.key = "state";
+  state.hints = kStateIsBase64Blob;
+}
+void VvvstPlugin::setState(const char *key, const char *value) {
+  Rust::plugin_set_state(inner, value);
+}
+String VvvstPlugin::getState(const char *key) const {
+  auto stateStringPtr = Rust::plugin_get_state(inner);
+  auto stateStdString = std::string(stateStringPtr);
+  Rust::cstring_drop(stateStringPtr);
+
+  return String(stateStdString.c_str());
+}
 
 /* --------------------------------------------------------------------------------------------------------
  * Process */

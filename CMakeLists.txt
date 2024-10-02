@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.24)
 
-set(DPF_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/DPF")
-include(./deps/DPF/cmake/DPF-plugin.cmake)
+# 普通にadd_subdirectoryすると、なぜかvcpkgで無限ループが発生するので、
+# 直接DPF-plugin.cmakeをincludeする
+set(DPF_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/dpf")
+include(./deps/dpf/cmake/DPF-plugin.cmake)
 
 project(vvvst)
 add_library(rust STATIC IMPORTED)

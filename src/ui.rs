@@ -1,15 +1,11 @@
 use crate::common::RUNTIME;
 use crate::model::*;
-use crate::plugin::{PluginImpl, ToPluginMessage};
+use crate::plugin::PluginImpl;
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
-use std::{
-    borrow::Cow,
-    collections::HashSet,
-    num::NonZeroIsize,
-    sync::{mpsc::Sender as SyncSender, Arc, Mutex as StdMutex},
-};
-use tokio::sync::Mutex;
+use serde::{Deserialize, Serialize};
+use std::{borrow::Cow, collections::HashSet, num::NonZeroIsize, sync::Arc};
+use tokio::sync::{mpsc::UnboundedReceiver, Mutex};
 use tracing::{error, info, warn};
 
 static EDITOR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/resources/editor");
@@ -17,8 +13,15 @@ pub struct PluginUiImpl {
     raw_window_handle: raw_window_handle::RawWindowHandle,
     window: Arc<wry::WebView>,
 
-    plugin_sender: SyncSender<ToPluginMessage>,
-    response_receiver: tokio::sync::mpsc::UnboundedReceiver<Response>,
+    notification_receiver: UnboundedReceiver<UiNotification>,
+    response_receiver: UnboundedReceiver<Response>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UiNotification {
+    UpdatePlayingState(bool),
+    UpdatePlayingPosition(f32),
 }
 
 impl PluginUiImpl {
@@ -29,10 +32,10 @@ impl PluginUiImpl {
             ));
         let window_handle = raw_window_handle::WindowHandle::borrow_raw(raw_window_handle);
 
-        let (plugin_sender, plugin_receiver) = std::sync::mpsc::channel();
+        let (notification_sender, notification_receiver) = tokio::sync::mpsc::unbounded_channel();
         {
             let mut plugin = RUNTIME.block_on(plugin.lock());
-            plugin.receiver = Some(Arc::new(StdMutex::new(plugin_receiver)));
+            plugin.notification_sender = Some(notification_sender);
         }
 
         let (response_sender, response_receiver) =
@@ -120,7 +123,7 @@ impl PluginUiImpl {
             raw_window_handle,
             window,
 
-            plugin_sender,
+            notification_receiver,
             response_receiver,
         }
     }

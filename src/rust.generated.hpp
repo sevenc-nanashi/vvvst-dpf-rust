@@ -30,7 +30,13 @@ EXPORT Version get_version();
 
 EXPORT const char *get_plugin_name();
 
+EXPORT void cstring_drop(char *s);
+
 EXPORT Plugin *plugin_new();
+
+EXPORT void plugin_set_state(const Plugin *plugin, const char *state);
+
+EXPORT char *plugin_get_state(const Plugin *plugin);
 
 EXPORT void plugin_drop(Plugin *plugin);
 

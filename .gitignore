@@ -27,3 +27,5 @@ _deps
 /build
 /out
 /target
+/logs/*
+!/logs/.gitkeep
