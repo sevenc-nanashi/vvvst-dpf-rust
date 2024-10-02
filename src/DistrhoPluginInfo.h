@@ -21,7 +21,7 @@
 #define DISTRHO_PLUGIN_BRAND "Nanashi."
 #define DISTRHO_PLUGIN_NAME "VVVST"
 #define DISTRHO_PLUGIN_URI                                                     \
-  "https://github.com/sevenc-nanashi/dpf-webview-template"
+  "https://github.com/sevenc-nanashi/vvvst-dpf-rust"
 
 #define DISTRHO_PLUGIN_BRAND_ID ScNs
 #define DISTRHO_PLUGIN_UNIQUE_ID V3st

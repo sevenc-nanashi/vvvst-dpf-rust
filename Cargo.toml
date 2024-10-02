@@ -12,7 +12,7 @@ base64 = "0.22.1"
 include_dir = "0.7.4"
 mime_guess = "2.0.5"
 raw-window-handle = "0.6.2"
-rfd = "0.15.0"
+rfd = { version = "0.15.0", features = ["common-controls-v6"] }
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.128"
 tokio = { version = "1.40.0", features = ["io-util", "rt", "rt-multi-thread", "fs", "macros", "sync"] }
@@ -23,3 +23,6 @@ wry = "0.45.0"
 
 [lib]
 crate-type = ["cdylib", "staticlib"]
+
+[build-dependencies]
+embed-resource = "2.5.0"

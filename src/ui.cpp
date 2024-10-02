@@ -27,6 +27,8 @@ public:
     onSizeChanged(width, height);
   }
 
+  void uiIdle() override { Rust::plugin_ui_idle(inner); }
+
   void stateChanged(const char *key, const char *value) override {}
 
   void onSizeChanged(uint width, uint height) {

@@ -4,9 +4,7 @@
 #include "rust.generated.hpp"
 // -----------------------------------------------------------------------------------------------------------
 
-VvvstPlugin::VvvstPlugin() : Plugin(0, 0, 1) {
-  inner = Rust::plugin_new();
-}
+VvvstPlugin::VvvstPlugin() : Plugin(0, 0, 1) { inner = Rust::plugin_new(); }
 VvvstPlugin::~VvvstPlugin() { Rust::plugin_drop(inner); }
 
 /**
@@ -20,13 +18,15 @@ const char *VvvstPlugin::getLabel() const { return "vvvst"; }
    Get an extensive comment/description about the plugin.
  */
 const char *VvvstPlugin::getDescription() const {
-  return "Plugin to demonstrate webview ui.";
+  return "VOICEVOXのVSTプラグインです。";
 }
 
 /**
    Get the plugin author/maker.
  */
-const char *VvvstPlugin::getMaker() const { return "dpf webview template"; }
+const char *VvvstPlugin::getMaker() const {
+  return "Nanashi. <https://sevenc7c.com>";
+}
 
 /**
    Get the plugin homepage.
@@ -44,7 +44,11 @@ const char *VvvstPlugin::getLicense() const { return "MIT"; }
 /**
    Get the plugin version, in hexadecimal.
  */
-uint32_t VvvstPlugin::getVersion() const { return d_version(1, 0, 0); }
+uint32_t VvvstPlugin::getVersion() const {
+  auto version = Rust::get_version();
+
+  return d_version(version.major, version.minor, version.patch);
+}
 
 /* --------------------------------------------------------------------------------------------------------
  * Init */

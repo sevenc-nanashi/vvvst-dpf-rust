@@ -18,7 +18,17 @@ struct Plugin;
 
 struct PluginUi;
 
+struct Version {
+  uint8_t major;
+  uint8_t minor;
+  uint8_t patch;
+};
+
 extern "C" {
+
+EXPORT Version get_version();
+
+EXPORT const char *get_plugin_name();
 
 EXPORT Plugin *plugin_new();
 
@@ -29,6 +39,8 @@ EXPORT PluginUi *plugin_ui_new(uintptr_t handle, const Plugin *plugin);
 EXPORT uintptr_t plugin_ui_get_native_window_handle(const PluginUi *plugin_ui);
 
 EXPORT void plugin_ui_set_size(const PluginUi *plugin_ui, uintptr_t width, uintptr_t height);
+
+EXPORT void plugin_ui_idle(const PluginUi *plugin_ui);
 
 EXPORT void plugin_ui_drop(PluginUi *plugin_ui);
 

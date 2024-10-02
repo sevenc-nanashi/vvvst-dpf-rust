@@ -12,12 +12,13 @@ use std::{
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
-static EDITOR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/editor");
+static EDITOR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/resources/editor");
 pub struct PluginUiImpl {
     raw_window_handle: raw_window_handle::RawWindowHandle,
     window: Arc<wry::WebView>,
 
     plugin_sender: SyncSender<ToPluginMessage>,
+    response_receiver: tokio::sync::mpsc::UnboundedReceiver<Response>,
 }
 
 impl PluginUiImpl {
@@ -120,6 +121,14 @@ impl PluginUiImpl {
             window,
 
             plugin_sender,
+            response_receiver,
+        }
+    }
+
+    pub fn idle(&mut self) {
+        while let Ok(message) = self.response_receiver.try_recv() {
+            let js = PluginUiImpl::response_to_js(&message);
+            self.window.evaluate_script(&js).unwrap();
         }
     }
 

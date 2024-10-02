@@ -1,0 +1,13 @@
+{
+  "additional_commands": {
+    "dpf_add_plugin": {
+      "pargs": 1,
+      "kwargs": {
+        "TARGETS": "*",
+        "UI_TYPE": 1,
+        "FILES_DSP": "*",
+        "FILES_UI": "*"
+      }
+    }
+  }
+}
