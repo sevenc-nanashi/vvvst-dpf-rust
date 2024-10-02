@@ -3330,6 +3330,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "wav_io",
  "winit",
  "wry",
 ]
@@ -3422,6 +3423,12 @@ name = "wasm-bindgen-shared"
 version = "0.2.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c62a0a307cb4a311d3a07867860911ca130c3494e8c2719593806c08bc5d0484"
+
+[[package]]
+name = "wav_io"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3236ffff9f79a92caa694bbad1cbbd3e13958993f3f983c1066414d487a1d33"
 
 [[package]]
 name = "wayland-backend"

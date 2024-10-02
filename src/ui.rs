@@ -228,7 +228,7 @@ impl PluginUiImpl {
 
                 let plugin = Arc::clone(&plugin);
                 tokio::spawn(async move {
-                    plugin.lock().await.update_audio_samples().await;
+                    plugin.lock().await.update_audio_samples(None).await;
                 });
                 Ok(serde_json::Value::Null)
             }

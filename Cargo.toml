@@ -19,6 +19,7 @@ serde_json = "1.0.128"
 tokio = { version = "1.40.0", features = ["io-util", "rt", "rt-multi-thread", "fs", "macros", "sync"] }
 tracing = { version = "0.1.40", features = ["log"] }
 tracing-subscriber = "0.3.18"
+wav_io = "0.1.14"
 winit = "0.30.5"
 wry = "0.45.0"
 

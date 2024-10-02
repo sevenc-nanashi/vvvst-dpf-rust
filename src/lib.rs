@@ -77,6 +77,30 @@ unsafe extern "C" fn plugin_get_state(plugin: &Plugin) -> *mut std::os::raw::c_c
 }
 
 #[no_mangle]
+unsafe extern "C" fn plugin_run(
+    plugin: &Plugin,
+    outputs: *mut *mut f32,
+    sample_rate: f32,
+    sample_count: usize,
+    is_playing: bool,
+    current_sample: usize,
+) {
+    let mut outputs = std::slice::from_raw_parts_mut(outputs, 2)
+        .iter_mut()
+        .map(|&mut ptr| std::slice::from_raw_parts_mut(ptr, sample_count))
+        .collect::<Vec<_>>();
+
+    let plugin_ref = Arc::clone(&plugin.inner);
+    plugin::PluginImpl::run(
+        plugin_ref,
+        &mut outputs,
+        sample_rate,
+        is_playing,
+        current_sample,
+    );
+}
+
+#[no_mangle]
 unsafe extern "C" fn plugin_drop(plugin: *mut Plugin) {
     if plugin.is_null() {
         return;

@@ -88,7 +88,14 @@ String VvvstPlugin::getState(const char *key) const {
 /**
    Run/process function for plugins without MIDI input.
  */
-void VvvstPlugin::run(const float **inputs, float **outputs, uint32_t frames) {}
+void VvvstPlugin::run(const float **inputs, float **outputs, uint32_t frames) {
+  auto sampleRate = this->getSampleRate();
+  auto timePosition = this->getTimePosition();
+  auto samplePosition = timePosition.frame;
+  auto isPlaying = timePosition.playing;
+  Rust::plugin_run(inner, outputs, sampleRate, frames, isPlaying,
+                   samplePosition);
+}
 
 START_NAMESPACE_DISTRHO
 Plugin *createPlugin() { return new VvvstPlugin(); }

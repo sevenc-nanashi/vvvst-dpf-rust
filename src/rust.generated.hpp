@@ -38,6 +38,14 @@ EXPORT void plugin_set_state(const Plugin *plugin, const char *state);
 
 EXPORT char *plugin_get_state(const Plugin *plugin);
 
+EXPORT
+void plugin_run(const Plugin *plugin,
+                float **outputs,
+                float sample_rate,
+                uintptr_t sample_count,
+                bool is_playing,
+                uintptr_t current_sample);
+
 EXPORT void plugin_drop(Plugin *plugin);
 
 EXPORT PluginUi *plugin_ui_new(uintptr_t handle, const Plugin *plugin);
