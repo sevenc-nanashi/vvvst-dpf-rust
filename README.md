@@ -58,7 +58,7 @@ sequenceDiagram
 
     opt エディタのフレーズが更新されたら
         vue->>rust: タイミング、SingingVoiceKey
-        rust->>vue: 不足しているSingingVoiceKey
+        rust->>vue: 不足しているSingingVoiceKeyの一覧
         vue->>rust: SingingVoice
         Note over rust: wavパース&再サンプル->ミックスダウン作成 @ 別スレッド
     end
