@@ -8,9 +8,20 @@ use std::{
         Arc, Mutex, Once, Weak,
     },
 };
+use tokio::sync::RwLock;
 
 pub struct PluginImpl {
-    pub receiver: Option<Receiver<ToPluginMessage>>,
+    pub receiver: Option<Arc<Mutex<Receiver<ToPluginMessage>>>>,
+
+    pub params: Arc<RwLock<PluginParams>>,
+    pub mixes: Arc<RwLock<Vec<f32>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PluginParams {
+    pub project: Option<String>,
+    pub phrases: Vec<Phrase>,
+    pub voices: HashMap<SingingVoiceKey, Vec<u8>>,
 }
 
 static INIT: Once = Once::new();
@@ -70,8 +81,18 @@ impl PluginImpl {
                 std::process::exit(1);
             }));
         });
-        PluginImpl { receiver: None }
+        PluginImpl {
+            receiver: None,
+            params: Arc::new(RwLock::new(PluginParams {
+                project: None,
+                phrases: vec![],
+                voices: HashMap::new(),
+            })),
+            mixes: Arc::new(RwLock::new(vec![])),
+        }
     }
+
+    pub async fn update_audio_samples(&self) {}
 }
 
 pub enum ToPluginMessage {

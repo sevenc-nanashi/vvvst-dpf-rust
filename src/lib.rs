@@ -1,8 +1,11 @@
 mod model;
 mod plugin;
 mod ui;
-mod utils;
-use std::{sync::Arc, sync::Mutex};
+mod common;
+
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use crate::common::RUNTIME;
 
 pub struct Plugin {
     inner: Arc<Mutex<plugin::PluginImpl>>,
@@ -32,8 +35,7 @@ unsafe extern "C" fn plugin_drop(plugin: *mut Plugin) {
 #[no_mangle]
 unsafe extern "C" fn plugin_ui_new(handle: usize, plugin: &Plugin) -> *mut PluginUi {
     let plugin_ref = Arc::clone(&plugin.inner);
-    let mut plugin = plugin_ref.lock().unwrap();
-    let plugin_ui = ui::PluginUiImpl::new(handle, &mut plugin);
+    let plugin_ui = ui::PluginUiImpl::new(handle, plugin_ref);
 
     Box::into_raw(Box::new(PluginUi {
         inner: Arc::new(Mutex::new(plugin_ui)),
@@ -42,13 +44,13 @@ unsafe extern "C" fn plugin_ui_new(handle: usize, plugin: &Plugin) -> *mut Plugi
 
 #[no_mangle]
 unsafe extern "C" fn plugin_ui_get_native_window_handle(plugin_ui: &PluginUi) -> usize {
-    let plugin_ui = plugin_ui.inner.lock().unwrap();
+    let plugin_ui =RUNTIME.block_on(plugin_ui.inner.lock());
     plugin_ui.get_native_window_handle()
 }
 
 #[no_mangle]
 unsafe extern "C" fn plugin_ui_set_size(plugin_ui: &PluginUi, width: usize, height: usize) {
-    let plugin_ui = plugin_ui.inner.lock().unwrap();
+    let plugin_ui = RUNTIME.block_on(plugin_ui.inner.lock());
     plugin_ui.set_size(width, height);
 }
 
