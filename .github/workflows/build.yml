@@ -67,7 +67,7 @@ jobs:
       - name: Generate public/licenses.json
         run: |
           npm run license:generate -- -o editor_licenses.json
-          npm run license:merge -- -o public/licenses.json -i editor_licenses.json -i vvvst/resources/editor_ext/licenses.json
+          npm run license:merge -- -o public/licenses.json -i editor_licenses.json -i vvvst/resources/editor_ext/licenses.generated.json
 
       - name: Build
         run: |
