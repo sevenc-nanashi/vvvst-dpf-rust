@@ -223,6 +223,12 @@ impl PluginUiImpl {
                 for audio_hash in unused_voices {
                     samples.remove(&audio_hash);
                 }
+                if missing_voices.is_empty() {
+                    let plugin = Arc::clone(&plugin);
+                    tokio::spawn(async move {
+                        plugin.lock().await.update_audio_samples(None).await;
+                    });
+                }
                 Ok(serde_json::to_value(SetPhraseResult {
                     missing_voices: missing_voices.into_iter().collect(),
                 })?)
