@@ -28,6 +28,13 @@ struct BuildArgs {
     /// 開発用サーバーのURL。デフォルトはhttp://localhost:5173。
     #[clap(short, long)]
     dev_server_url: Option<String>,
+
+    /// Rustのビルドをスキップするかどうか。
+    #[clap(long)]
+    skip_rust: bool,
+    /// C++のビルドをスキップするかどうか。
+    #[clap(long)]
+    skip_cpp: bool,
 }
 
 fn generate_header() {
@@ -46,7 +53,10 @@ fn build(args: BuildArgs) {
         .parent()
         .unwrap();
     if args.release {
-        let editor_path = main_crate.join("resources").join("editor").join("index.html");
+        let editor_path = main_crate
+            .join("resources")
+            .join("editor")
+            .join("index.html");
         if !editor_path.exists() {
             panic!("Editor resources not found at {:?}", editor_path);
         }
@@ -65,41 +75,54 @@ fn build(args: BuildArgs) {
     if let Some(dev_server_url) = args.dev_server_url {
         envs.insert("VVVST_DEV_SERVER_URL".to_string(), dev_server_url);
     }
-    if args.release {
-        duct::cmd!("cargo", "build", "--release")
-    } else {
-        duct::cmd!("cargo", "build")
+    if !args.skip_rust {
+        if args.release {
+            duct::cmd!("cargo", "build", "--release")
+        } else {
+            duct::cmd!("cargo", "build")
+        }
+        .dir(main_crate)
+        .full_env(envs)
+        .run()
+        .unwrap();
     }
-    .dir(main_crate)
-    .full_env(envs)
-    .run()
-    .unwrap();
 
-    let build_name = if args.release {
-        "x64-Release"
+    let destination_path = if cfg!(windows) {
+        // Visual Studioと合わせる
+        let build_name = if args.release {
+            "x64-Release"
+        } else {
+            "x64-Debug"
+        };
+
+        main_crate.join("build").join(build_name)
     } else {
-        "x64-Debug"
+        main_crate.join("build")
     };
-    let destination_path = main_crate.join("out").join("build").join(build_name);
-    if !destination_path.exists() {
-        duct::cmd!(
-            "cmake",
-            format!(
-                "-DCMAKE_BUILD_TYPE={}",
-                if args.release { "Release" } else { "Debug" }
-            ),
-            format!("-Bout/build/{}", build_name)
-        )
-        .dir(main_crate)
-        .run()
-        .unwrap();
-    }
-    duct::cmd!("cmake", "--build", format!("out/build/{}", build_name))
-        .dir(main_crate)
-        .run()
-        .unwrap();
 
-    println!("Built to {:?}", destination_path);
+    if !args.skip_cpp {
+        let build_type = format!(
+            "-DCMAKE_BUILD_TYPE={}",
+            if args.release { "Release" } else { "Debug" }
+        );
+        let build_dir = format!("-B{}", &destination_path.to_string_lossy());
+        // なぜか_add_libraryが無限に再帰するので、vcpkgを無効化する。
+        // https://github.com/microsoft/vcpkg/issues/11307
+        if cfg!(windows) {
+            duct::cmd!("cmake", "-DCMAKE_TOOLCHAIN_FILE=", &build_type, &build_dir)
+        } else {
+            duct::cmd!("cmake", &build_type, &build_dir)
+        }
+        .dir(main_crate)
+        .run()
+        .unwrap();
+        duct::cmd!("cmake", "--build", &destination_path)
+            .dir(main_crate)
+            .run()
+            .unwrap();
+    }
+
+    println!("Built to {:?}", &destination_path);
     println!("Plugin dir: {:?}", destination_path.join("bin"));
     if args.log {
         println!("Logs dir: {:?}", main_crate.join("logs"));

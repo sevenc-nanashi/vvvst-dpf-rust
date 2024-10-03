@@ -24,7 +24,7 @@ winit = "0.30.5"
 wry = "0.45.0"
 
 [lib]
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["staticlib"]
 
 [build-dependencies]
 embed-resource = "2.5.0"

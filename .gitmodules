@@ -1,3 +1,6 @@
 [submodule "deps/dpf"]
 	path = deps/dpf
 	url = https://github.com/distrho/DPF.git
+[submodule "deps/corrosion"]
+	path = deps/corrosion
+	url = https://github.com/corrosion-rs/corrosion
