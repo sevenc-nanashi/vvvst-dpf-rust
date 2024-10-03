@@ -26,11 +26,6 @@ corrosion_import_crate(
 # MSVC専用：utf-8を使う
 if(MSVC)
   add_compile_options("/utf-8")
-elseif(APPLE)
-  enable_language(OBJC)
-  target_link_libraries(${VVVST_NAME} "-framework CoreFoundation")
-  target_link_libraries(${VVVST_NAME} "-framework QuartzCore")
-  set_target_properties(${VVVST_NAME} PROPERTIES LINK_FLAGS "-Wl,-F/Library/Frameworks")
 endif()
 
 dpf_add_plugin(
@@ -39,6 +34,13 @@ dpf_add_plugin(
   UI_TYPE external
   FILES_DSP src/plugin.cpp
   FILES_UI src/ui.cpp)
+
+if(APPLE)
+  enable_language(OBJC)
+  target_link_libraries(${VVVST_NAME} "-framework CoreFoundation")
+  target_link_libraries(${VVVST_NAME} "-framework QuartzCore")
+  set_target_properties(${VVVST_NAME} PROPERTIES LINK_FLAGS "-Wl,-F/Library/Frameworks")
+endif()
 
 target_link_libraries(${VVVST_NAME} PRIVATE vvvst_dpf_rust)
 target_include_directories(${VVVST_NAME} PUBLIC "src" "deps")
