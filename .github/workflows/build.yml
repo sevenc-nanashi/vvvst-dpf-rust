@@ -51,7 +51,7 @@ jobs:
 
           cp resource/editor/PRIVACYPOLICY.md public/privacyPolicy.md
 
-          cat ./vvvst/resources/editor/howtouse.md ./public/howtouse.md > ./public/howtouse.md.tmp
+          cat ./vvvst/resources/editor_ext/howtouse.md ./public/howtouse.md > ./public/howtouse.md.tmp
           mv ./public/howtouse.md.tmp ./public/howtouse.md
 
       - name: Setup Node.js
