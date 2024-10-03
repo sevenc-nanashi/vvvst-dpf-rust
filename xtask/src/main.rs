@@ -80,44 +80,36 @@ fn build(args: BuildArgs) {
     if let Some(dev_server_url) = args.dev_server_url {
         envs.insert("VVVST_DEV_SERVER_URL".to_string(), dev_server_url);
     }
-    let destination_path = if cfg!(windows) {
-        // Visual Studioと合わせる
-        let build_name = if args.release {
-            "x64-Release"
-        } else {
-            "x64-Debug"
-        };
 
-        main_crate.join("build").join(build_name)
+    let build_name = if args.release { "release" } else { "debug" };
+
+    let destination_path = main_crate.join("build").join(build_name);
+
+    let build_type = format!(
+        "-DCMAKE_BUILD_TYPE={}",
+        if args.release { "Release" } else { "Debug" }
+    );
+    let build_dir = format!("-B{}", &destination_path.to_string_lossy());
+    // なぜか_add_libraryが無限に再帰するので、vcpkgを無効化する。
+    // https://github.com/microsoft/vcpkg/issues/11307
+    if cfg!(windows) {
+        duct::cmd!(
+            "cmake",
+            "-DCMAKE_TOOLCHAIN_FILE=OFF",
+            &build_type,
+            &build_dir
+        )
     } else {
-        main_crate.join("build")
-    };
-
-        let build_type = format!(
-            "-DCMAKE_BUILD_TYPE={}",
-            if args.release { "Release" } else { "Debug" }
-        );
-        let build_dir = format!("-B{}", &destination_path.to_string_lossy());
-        // なぜか_add_libraryが無限に再帰するので、vcpkgを無効化する。
-        // https://github.com/microsoft/vcpkg/issues/11307
-        if cfg!(windows) {
-            duct::cmd!(
-                "cmake",
-                "-DCMAKE_TOOLCHAIN_FILE=OFF",
-                &build_type,
-                &build_dir
-            )
-        } else {
-            duct::cmd!("cmake", &build_type, &build_dir)
-        }
+        duct::cmd!("cmake", &build_type, &build_dir)
+    }
+    .dir(main_crate)
+    .run()
+    .unwrap();
+    duct::cmd!("cmake", "--build", &destination_path)
         .dir(main_crate)
+        .full_env(envs)
         .run()
         .unwrap();
-        duct::cmd!("cmake", "--build", &destination_path)
-            .dir(main_crate)
-            .full_env(envs)
-            .run()
-            .unwrap();
 
     println!("Built to {:?}", &destination_path);
     println!("Plugin dir: {:?}", destination_path.join("bin"));
@@ -148,7 +140,10 @@ fn generate_licenses() {
     let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
-    let destination_path = main_crate.join("resources").join("licenses.generated.json");
+    let destination_path = main_crate
+        .join("resources")
+        .join("editor_ext")
+        .join("licenses.generated.json");
     let cargo_toml_path = main_crate.join("Cargo.toml");
     let krates = cargo_about::get_all_crates(
         &camino::Utf8Path::new(&cargo_toml_path.to_string_lossy()),
@@ -238,10 +233,7 @@ fn generate_installer() {
         .dir(main_crate)
         .run()
         .unwrap();
-    println!(
-        "Generated installer to {:?}",
-        main_crate.join("target").join("installer.exe")
-    );
+    println!("Generated installer",);
 }
 
 fn main() {
