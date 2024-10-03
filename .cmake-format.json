@@ -8,6 +8,14 @@
         "FILES_DSP": "*",
         "FILES_UI": "*"
       }
+    },
+    "corrosion_import_crate": {
+      "pargs": 0,
+      "kwargs": {
+        "MANIFEST_PATH": "*",
+        "PROFILE": 1,
+        "CRATES": "*"
+      }
     }
   }
 }

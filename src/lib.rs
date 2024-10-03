@@ -39,7 +39,15 @@ unsafe extern "C" fn get_version() -> Version {
 
 #[no_mangle]
 unsafe extern "C" fn get_plugin_name() -> *const std::os::raw::c_char {
-    let name = env!("CARGO_PKG_NAME");
+    let name = format!(
+        "{}-{}",
+        env!("CARGO_PKG_NAME"),
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
+    );
     let name = name.as_bytes();
     let name = std::ffi::CString::new(name).unwrap();
     name.into_raw()

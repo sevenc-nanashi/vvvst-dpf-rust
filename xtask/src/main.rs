@@ -1,4 +1,10 @@
+use std::{
+    collections::HashSet,
+    hash::{Hash, Hasher},
+};
+
 use clap::{Parser, Subcommand};
+use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -15,6 +21,12 @@ enum SubCommands {
     /// プラグインをビルドする。
     #[command(version, about, long_about = None)]
     Build(BuildArgs),
+    /// licenses.jsonを生成する。
+    #[command(version, about, long_about = None)]
+    GenerateLicenses,
+    /// Windows用のインストーラーを生成する。
+    #[command(version, about, long_about = None)]
+    GenerateInstaller,
 }
 
 #[derive(Parser, Debug)]
@@ -28,13 +40,6 @@ struct BuildArgs {
     /// 開発用サーバーのURL。デフォルトはhttp://localhost:5173。
     #[clap(short, long)]
     dev_server_url: Option<String>,
-
-    /// Rustのビルドをスキップするかどうか。
-    #[clap(long)]
-    skip_rust: bool,
-    /// C++のビルドをスキップするかどうか。
-    #[clap(long)]
-    skip_cpp: bool,
 }
 
 fn generate_header() {
@@ -75,18 +80,6 @@ fn build(args: BuildArgs) {
     if let Some(dev_server_url) = args.dev_server_url {
         envs.insert("VVVST_DEV_SERVER_URL".to_string(), dev_server_url);
     }
-    if !args.skip_rust {
-        if args.release {
-            duct::cmd!("cargo", "build", "--release")
-        } else {
-            duct::cmd!("cargo", "build")
-        }
-        .dir(main_crate)
-        .full_env(envs)
-        .run()
-        .unwrap();
-    }
-
     let destination_path = if cfg!(windows) {
         // Visual Studioと合わせる
         let build_name = if args.release {
@@ -100,7 +93,6 @@ fn build(args: BuildArgs) {
         main_crate.join("build")
     };
 
-    if !args.skip_cpp {
         let build_type = format!(
             "-DCMAKE_BUILD_TYPE={}",
             if args.release { "Release" } else { "Debug" }
@@ -109,7 +101,12 @@ fn build(args: BuildArgs) {
         // なぜか_add_libraryが無限に再帰するので、vcpkgを無効化する。
         // https://github.com/microsoft/vcpkg/issues/11307
         if cfg!(windows) {
-            duct::cmd!("cmake", "-DCMAKE_TOOLCHAIN_FILE=OFF", &build_type, &build_dir)
+            duct::cmd!(
+                "cmake",
+                "-DCMAKE_TOOLCHAIN_FILE=OFF",
+                &build_type,
+                &build_dir
+            )
         } else {
             duct::cmd!("cmake", &build_type, &build_dir)
         }
@@ -118,15 +115,133 @@ fn build(args: BuildArgs) {
         .unwrap();
         duct::cmd!("cmake", "--build", &destination_path)
             .dir(main_crate)
+            .full_env(envs)
             .run()
             .unwrap();
-    }
 
     println!("Built to {:?}", &destination_path);
     println!("Plugin dir: {:?}", destination_path.join("bin"));
     if args.log {
         println!("Logs dir: {:?}", main_crate.join("logs"));
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
+struct License {
+    name: String,
+    version: String,
+    license: String,
+    text: String,
+}
+impl Hash for License {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
+}
+impl PartialEq for License {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+fn generate_licenses() {
+    let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let destination_path = main_crate.join("resources").join("licenses.generated.json");
+    let cargo_toml_path = main_crate.join("Cargo.toml");
+    let krates = cargo_about::get_all_crates(
+        &camino::Utf8Path::new(&cargo_toml_path.to_string_lossy()),
+        false,
+        false,
+        vec![],
+        false,
+        &Default::default(),
+    )
+    .unwrap();
+    let licenses = krates
+        .krates()
+        .map(|krate| {
+            let license = krate
+                .license
+                .as_ref()
+                .map(|license| license.to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let mut license_text = format!("License: {}\n", license);
+            let mut license_file_paths = vec!["license".to_string(), "copying".to_string()];
+            if let Some(license_file) = krate.license_file.as_ref() {
+                let license_file = license_file.to_string().to_lowercase();
+                license_file_paths.insert(0, license_file);
+            }
+            let files = std::fs::read_dir(krate.manifest_path.parent().unwrap()).unwrap();
+            for file in files {
+                let file = file.unwrap();
+                if let Some(file_name) = file.file_name().to_str() {
+                    let file_name = file_name.to_lowercase();
+                    if license_file_paths
+                        .iter()
+                        .any(|path| file_name.contains(path))
+                    {
+                        let text = std::fs::read_to_string(file.path()).unwrap();
+                        license_text.push_str(&text);
+                        break;
+                    }
+                }
+            }
+            License {
+                name: krate.name.to_string(),
+                version: krate.version.to_string(),
+                license,
+                text: license_text,
+            }
+        })
+        .collect::<HashSet<_>>();
+
+    let licenses_json = serde_json::to_string_pretty(&licenses).unwrap();
+    std::fs::write(&destination_path, licenses_json).unwrap();
+
+    println!("Generated licenses to {:?}", destination_path);
+    println!(
+        "License count: {}/{}",
+        licenses
+            .iter()
+            .filter(|license| license.text.split('\n').count() > 2)
+            .count(),
+        licenses.len()
+    );
+}
+
+fn generate_installer() {
+    let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let main_cargo_toml = main_crate.join("Cargo.toml");
+    let main_cargo_toml = cargo_toml::Manifest::from_path(&main_cargo_toml).unwrap();
+
+    let version: String = main_cargo_toml.package.unwrap().version.unwrap();
+
+    let installer_base = main_crate
+        .join("resources")
+        .join("installer")
+        .join("installer_base.nsi");
+    let installer_dist = main_crate.join("installer.nsi");
+
+    let installer_base = std::fs::read_to_string(&installer_base).unwrap();
+    std::fs::write(
+        &installer_dist,
+        installer_base.replace("{version}", &version),
+    )
+    .unwrap();
+    println!("Generated installer to {:?}", installer_dist);
+
+    duct::cmd!("makensis", &installer_dist, "/INPUTCHARSET", "UTF8")
+        .dir(main_crate)
+        .run()
+        .unwrap();
+    println!(
+        "Generated installer to {:?}",
+        main_crate.join("target").join("installer.exe")
+    );
 }
 
 fn main() {
@@ -138,6 +253,12 @@ fn main() {
         }
         SubCommands::Build(build_args) => {
             build(build_args);
+        }
+        SubCommands::GenerateLicenses => {
+            generate_licenses();
+        }
+        SubCommands::GenerateInstaller => {
+            generate_installer();
         }
     }
 }

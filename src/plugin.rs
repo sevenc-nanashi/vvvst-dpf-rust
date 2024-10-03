@@ -215,16 +215,16 @@ impl PluginImpl {
                     return;
                 }
                 if is_playing {
-                for i in 0..outputs[0].len() {
-                    let current_frame = current_sample + i;
-                    if current_frame < samples.len() {
-                        outputs[0][i] = samples[current_frame];
-                        outputs[1][i] = samples[current_frame];
-                    } else {
-                        outputs[0][i] = 0.0;
-                        outputs[1][i] = 0.0;
+                    for i in 0..outputs[0].len() {
+                        let current_frame = current_sample + i;
+                        if current_frame < samples.len() {
+                            outputs[0][i] = samples[current_frame];
+                            outputs[1][i] = samples[current_frame];
+                        } else {
+                            outputs[0][i] = 0.0;
+                            outputs[1][i] = 0.0;
+                        }
                     }
-                }
                 }
             }
 

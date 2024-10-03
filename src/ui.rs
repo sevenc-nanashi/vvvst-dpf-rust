@@ -47,8 +47,9 @@ impl PluginUiImpl {
         let window_builder = wry::WebViewBuilder::new(&window_handle)
             .with_background_color((165, 212, 173, 255))
             .with_custom_protocol("app".to_string(), |request| {
+                let path = request.uri().path();
                 EDITOR
-                    .get_file(request.uri().path())
+                    .get_file(path.trim_start_matches('/'))
                     .map(|file| {
                         info!("serving file: {:?}", file.path());
                         wry::http::Response::builder()
@@ -72,7 +73,7 @@ impl PluginUiImpl {
             .with_url(if cfg!(debug_assertions) {
                 option_env!("VVVST_DEV_SERVER_URL").unwrap_or("http://localhost:5173")
             } else {
-                "app://."
+                "app://vvvst.localhost/index.html"
             })
             .with_ipc_handler(move |message| {
                 let response_sender = Arc::clone(&response_sender);

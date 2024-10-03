@@ -19,7 +19,11 @@
 #define DISTRHO_PLUGIN_INFO_H_INCLUDED
 
 #define DISTRHO_PLUGIN_BRAND "Nanashi."
+#ifdef DEBUG
+#define DISTRHO_PLUGIN_NAME "VVVST (Debug)"
+#else
 #define DISTRHO_PLUGIN_NAME "VVVST"
+#endif
 #define DISTRHO_PLUGIN_URI                                                     \
   "https://github.com/sevenc-nanashi/vvvst-dpf-rust"
 

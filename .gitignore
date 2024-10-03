@@ -32,3 +32,4 @@ _deps
 
 /resources/editor/*
 !/resources/editor/.gitkeep
+installer.nsi
