@@ -109,7 +109,7 @@ fn build(args: BuildArgs) {
         // なぜか_add_libraryが無限に再帰するので、vcpkgを無効化する。
         // https://github.com/microsoft/vcpkg/issues/11307
         if cfg!(windows) {
-            duct::cmd!("cmake", "-DCMAKE_TOOLCHAIN_FILE=", &build_type, &build_dir)
+            duct::cmd!("cmake", "-DCMAKE_TOOLCHAIN_FILE=OFF", &build_type, &build_dir)
         } else {
             duct::cmd!("cmake", &build_type, &build_dir)
         }
