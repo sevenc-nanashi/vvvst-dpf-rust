@@ -121,7 +121,8 @@ jobs:
             }
             core.setOutput('ref_name', version);
             core.setOutput('prerelease', version === "255.255.255" || version.includes("-"));
-            core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.zip`);
+            core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.vst3.zip`);
+            core.setOutput('au_name', `VVVST-${version}-${{ matrix.name }}.au.zip`);
             require('fs').writeFileSync('version.txt', version);
 
       - name: Install dependencies (Ubuntu)
@@ -140,12 +141,21 @@ jobs:
           7z a -tzip ${{ steps.determine-information.outputs.zip_name }} vvvst.vst3
           cp ${{ steps.determine-information.outputs.zip_name }} ../../../
 
+      - name: Package AU
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd build/release/bin/
+          7z a -tzip ${{ steps.determine-information.outputs.au_name }} vvvst.component
+          cp ${{ steps.determine-information.outputs.au_name }} ../../../
+
       - name: Upload
         uses: softprops/action-gh-release@v2
         with:
           body: "SHA: ${{ github.sha }}"
           prerelease: ${{ steps.determine-information.outputs.prerelease }}
-          files: ${{ steps.determine-information.outputs.zip_name }}
+          files: |
+            ${{ steps.determine-information.outputs.zip_name }}
+            ${{ steps.determine-information.outputs.au_name }}
           tag_name: ${{ steps.determine-information.outputs.ref_name }}
 
       - name: Build installer
