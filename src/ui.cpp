@@ -1,3 +1,5 @@
+#include "extra/String.hpp"
+
 #include "DistrhoUI.hpp"
 #include "plugin.hpp"
 #include "rust.generated.hpp"
