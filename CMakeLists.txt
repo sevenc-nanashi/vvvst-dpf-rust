@@ -26,6 +26,11 @@ corrosion_import_crate(
 # MSVC専用：utf-8を使う
 if(MSVC)
   add_compile_options("/utf-8")
+elseif(APPLE)
+  enable_language(OBJC)
+  target_link_libraries(program "-framework CoreFoundation")
+  target_link_libraries(program "-framework QuartzCore")
+  set_target_properties(program PROPERTIES LINK_FLAGS "-Wl,-F/Library/Frameworks"
 endif()
 
 dpf_add_plugin(

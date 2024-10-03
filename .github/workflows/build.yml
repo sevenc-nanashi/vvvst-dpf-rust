@@ -113,10 +113,10 @@ jobs:
           script: |
             let version = github.ref_name;
             if (!version) {
-              version = "999.999.999";
+              version = "255.255.255";
             }
             core.setOutput('ref_name', version);
-            core.setOutput('prerelease', version === "999.999.999" || version.includes("-"));
+            core.setOutput('prerelease', version === "255.255.255" || version.includes("-"));
             core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.zip`);
             require('fs').writeFileSync('version.txt', version);
 
@@ -124,7 +124,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.0-dev libwebkit2gtk-4.0-dev libasound2-dev
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libwebkit2gtk-4.0-dev libasound2-dev
 
       - name: Build
         run: |
@@ -137,7 +137,7 @@ jobs:
           cp ${{ steps.determine-information.outputs.zip_name }} ../../../../
 
       - name: Upload
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           body: "SHA: ${{ github.sha }}"
           prerelease: ${{ steps.determine-information.outputs.prerelease }}
@@ -151,7 +151,7 @@ jobs:
 
       - name: Upload installer
         if: matrix.os == 'windows-latest'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.determine-information.outputs.ref_name }}
           files: ./build/VVVST-*-setup.exe

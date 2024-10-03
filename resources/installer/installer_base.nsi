@@ -59,7 +59,7 @@ Section "VVVST" Vvvst
 	SetOutPath "$INSTDIR"
   File "resources\installer\VVVST.ico"
   File "resources\installer\desktop.ini"
-  File /r "build\x64-Release\bin\vvvst.vst3\"
+  File /r "build\release\bin\vvvst.vst3\"
   System::Call "shlwapi::PathMakeSystemFolder(t '$INSTDIR') i."
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"

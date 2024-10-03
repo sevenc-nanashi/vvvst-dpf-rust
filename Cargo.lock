@@ -4227,7 +4227,7 @@ dependencies = [
 
 [[package]]
 name = "vvvst-dpf-rust"
-version = "0.21.0"
+version = "255.255.255"
 dependencies = [
  "anyhow",
  "base64",

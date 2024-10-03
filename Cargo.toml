@@ -1,6 +1,6 @@
 [package]
 name = "vvvst-dpf-rust"
-version = "0.21.0"
+version = "255.255.255"
 edition = "2021"
 
 [workspace]
