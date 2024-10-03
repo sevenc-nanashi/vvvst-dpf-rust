@@ -37,8 +37,8 @@ dpf_add_plugin(
 
 if(APPLE)
   enable_language(OBJC)
-  target_link_libraries(${VVVST_NAME} "-framework CoreFoundation")
-  target_link_libraries(${VVVST_NAME} "-framework QuartzCore")
+  target_link_libraries(${VVVST_NAME} PRIVATE "-framework CoreFoundation")
+  target_link_libraries(${VVVST_NAME} PRIVATE "-framework QuartzCore")
   set_target_properties(${VVVST_NAME} PROPERTIES LINK_FLAGS "-Wl,-F/Library/Frameworks")
 endif()
 

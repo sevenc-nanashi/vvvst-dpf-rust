@@ -2,7 +2,11 @@ use crate::common::RUNTIME;
 use crate::model::{Phrase, SingingVoiceKey};
 use crate::ui::UiNotification;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{MapAccess, Visitor},
+    ser::SerializeMap,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use std::{
     collections::HashMap,
     io::Write as _,
@@ -19,7 +23,6 @@ pub struct PluginImpl {
 
     prev_position: usize,
     prev_is_playing: bool,
-    last_position_sent: usize,
 }
 impl std::fmt::Debug for PluginImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -44,7 +47,58 @@ impl Default for Mixes {
 pub struct PluginParams {
     pub project: Option<String>,
     pub phrases: Vec<Phrase>,
+
+    #[serde(
+        serialize_with = "serialize_voices",
+        deserialize_with = "deserialize_voices"
+    )]
     pub voices: HashMap<SingingVoiceKey, Vec<u8>>,
+}
+
+// https://github.com/serde-rs/serde/issues/2554#issuecomment-1666887206
+fn serialize_voices<S>(
+    voices: &HashMap<SingingVoiceKey, Vec<u8>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let mut map = serializer.serialize_map(Some(voices.len()))?;
+    for (key, bytes) in voices {
+        let value = serde_bytes::ByteBuf::from(bytes.to_owned());
+        map.serialize_entry(&key.0, &value)?;
+    }
+    map.end()
+}
+
+fn deserialize_voices<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<SingingVoiceKey, Vec<u8>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct VoicesVisitor;
+
+    impl<'de> Visitor<'de> for VoicesVisitor {
+        type Value = HashMap<SingingVoiceKey, Vec<u8>>;
+        fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+        where
+            M: MapAccess<'de>,
+        {
+            let mut generic_tags = HashMap::new();
+            while let Some(key) = map.next_key::<String>()? {
+                let value = map.next_value::<serde_bytes::ByteBuf>()?;
+                generic_tags.insert(SingingVoiceKey(key), value.into_vec());
+            }
+            Ok(generic_tags)
+        }
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a map")
+        }
+    }
+
+    deserializer.deserialize_map(VoicesVisitor)
 }
 
 static INIT: Once = Once::new();
@@ -112,7 +166,6 @@ impl PluginImpl {
 
             prev_position: 0,
             prev_is_playing: false,
-            last_position_sent: 0,
         }
     }
 
@@ -184,7 +237,9 @@ impl PluginImpl {
         }
         let mut params = self.params.write().await;
         let state = base64.decode(state_base64).unwrap();
-        *params = bincode::deserialize(&state).unwrap();
+        if let Ok(loaded_params) = bincode::deserialize(&state) {
+            *params = loaded_params;
+        }
     }
 
     pub async fn get_state(&self) -> String {
