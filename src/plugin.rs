@@ -19,6 +19,7 @@ pub struct PluginImpl {
 
     prev_position: usize,
     prev_is_playing: bool,
+    last_position_sent: usize,
 }
 impl std::fmt::Debug for PluginImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -111,6 +112,7 @@ impl PluginImpl {
 
             prev_position: 0,
             prev_is_playing: false,
+            last_position_sent: 0,
         }
     }
 
@@ -228,18 +230,27 @@ impl PluginImpl {
                 }
             }
 
-            if this.prev_position != current_sample {
-                this.prev_position = current_sample;
+            if this.prev_position.abs_diff(current_sample) > (sample_rate / 10.0) as usize {
                 if let Some(sender) = &this.notification_sender {
-                    let _ = sender.send(UiNotification::UpdatePosition(
-                        (current_sample as f32) / sample_rate,
-                    ));
+                    if sender
+                        .send(UiNotification::UpdatePosition(
+                            (current_sample as f32) / sample_rate,
+                        ))
+                        .is_err()
+                    {
+                        this.notification_sender = None;
+                    }
                 }
             }
             if this.prev_is_playing != is_playing {
                 this.prev_is_playing = is_playing;
                 if let Some(sender) = &this.notification_sender {
-                    let _ = sender.send(UiNotification::UpdatePlayingState(is_playing));
+                    if sender
+                        .send(UiNotification::UpdatePlayingState(is_playing))
+                        .is_err()
+                    {
+                        this.notification_sender = None;
+                    }
                 }
             }
         }
