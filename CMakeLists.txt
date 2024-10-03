@@ -30,7 +30,7 @@ elseif(APPLE)
   enable_language(OBJC)
   target_link_libraries(program "-framework CoreFoundation")
   target_link_libraries(program "-framework QuartzCore")
-  set_target_properties(program PROPERTIES LINK_FLAGS "-Wl,-F/Library/Frameworks"
+  set_target_properties(program PROPERTIES LINK_FLAGS "-Wl,-F/Library/Frameworks")
 endif()
 
 dpf_add_plugin(
