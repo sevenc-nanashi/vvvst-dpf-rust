@@ -18,7 +18,8 @@
 #ifndef DISTRHO_PLUGIN_INFO_H_INCLUDED
 #define DISTRHO_PLUGIN_INFO_H_INCLUDED
 
-#define DISTRHO_PLUGIN_BRAND "Nanashi."
+// #define DISTRHO_PLUGIN_BRAND "Nanashi."
+#define DISTRHO_PLUGIN_BRAND "Voicevox"
 #ifdef DEBUG
 #define DISTRHO_PLUGIN_NAME "VVVST (Debug)"
 #else
@@ -27,8 +28,13 @@
 #define DISTRHO_PLUGIN_URI                                                     \
   "https://github.com/sevenc-nanashi/vvvst-dpf-rust"
 
+// #define DISTRHO_PLUGIN_BRAND_ID Vcvx
 #define DISTRHO_PLUGIN_BRAND_ID ScNs
 #define DISTRHO_PLUGIN_UNIQUE_ID V3st
+
+// #define DISTRHO_PLUGIN_CLAP_ID "jp.hiroshiba.vvvst"
+#define DISTRHO_PLUGIN_CLAP_ID "com.sevenc-nanashi.vvvst-dpf-rust"
+
 
 #define DISTRHO_PLUGIN_HAS_UI 1
 #define DISTRHO_PLUGIN_HAS_EMBED_UI 1
