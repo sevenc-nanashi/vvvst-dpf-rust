@@ -142,22 +142,6 @@ impl PluginImpl {
                     .with_ansi(false)
                     .try_init();
             }
-
-            // TODO: ちゃんとエラーダイアログを出す
-            let default_panic_hook = std::panic::take_hook();
-
-            std::panic::set_hook(Box::new(move |info| {
-                rfd::MessageDialog::new()
-                    .set_title("VVVST: Panic")
-                    .set_description(&format!("VVVST Panicked: {}", info))
-                    .set_level(rfd::MessageLevel::Error)
-                    .set_buttons(rfd::MessageButtons::Ok)
-                    .show();
-
-                default_panic_hook(info);
-
-                std::process::exit(1);
-            }));
         });
         PluginImpl {
             notification_sender: None,

@@ -6,6 +6,7 @@ mod ui;
 use crate::common::RUNTIME;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::error;
 
 pub struct Plugin {
     inner: Arc<Mutex<plugin::PluginImpl>>,
@@ -121,7 +122,13 @@ unsafe extern "C" fn plugin_drop(plugin: *mut Plugin) {
 #[no_mangle]
 unsafe extern "C" fn plugin_ui_new(handle: usize, plugin: &Plugin) -> *mut PluginUi {
     let plugin_ref = Arc::clone(&plugin.inner);
-    let plugin_ui = ui::PluginUiImpl::new(handle, plugin_ref);
+    let plugin_ui = match ui::PluginUiImpl::new(handle, plugin_ref) {
+        Ok(plugin_ui) => plugin_ui,
+        Err(e) => {
+            error!("Failed to create PluginUi: {}", e);
+            return std::ptr::null_mut();
+        }
+    };
 
     Box::into_raw(Box::new(PluginUi {
         inner: Arc::new(Mutex::new(plugin_ui)),
@@ -137,13 +144,17 @@ unsafe extern "C" fn plugin_ui_get_native_window_handle(plugin_ui: &PluginUi) ->
 #[no_mangle]
 unsafe extern "C" fn plugin_ui_set_size(plugin_ui: &PluginUi, width: usize, height: usize) {
     let plugin_ui = RUNTIME.block_on(plugin_ui.inner.lock());
-    plugin_ui.set_size(width, height);
+    if let Err(err) = plugin_ui.set_size(width, height) {
+        error!("Failed to set size: {}", err);
+    }
 }
 
 #[no_mangle]
 unsafe extern "C" fn plugin_ui_idle(plugin_ui: &PluginUi) {
     let mut plugin_ui = RUNTIME.block_on(plugin_ui.inner.lock());
-    plugin_ui.idle();
+    if let Err(err) = plugin_ui.idle() {
+        error!("Idle callback failed: {}", err);
+    }
 }
 
 #[no_mangle]

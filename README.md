@@ -32,8 +32,12 @@ Options:
 - [NSIS](https://nsis.sourceforge.io/Main_Page)（3.09 で動作確認）
 
 ```bash
-❯ cargo xtask installer -h
-# TODO
+❯ cargo xtask generate-installer -h
+Usage: xtask.exe generate-installer  
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version       
 ```
 
 ## 仕組み

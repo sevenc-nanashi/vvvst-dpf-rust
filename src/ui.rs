@@ -25,10 +25,11 @@ pub enum UiNotification {
 }
 
 impl PluginUiImpl {
-    pub unsafe fn new(handle: usize, plugin: Arc<Mutex<PluginImpl>>) -> Self {
+    pub unsafe fn new(handle: usize, plugin: Arc<Mutex<PluginImpl>>) -> Result<Self> {
         let raw_window_handle =
             raw_window_handle::RawWindowHandle::Win32(raw_window_handle::Win32WindowHandle::new(
-                NonZeroIsize::new(usize_to_isize(handle)).unwrap(),
+                NonZeroIsize::new(usize_to_isize(handle))
+                    .ok_or_else(|| anyhow::anyhow!("handle is zero"))?,
             ));
         let window_handle = raw_window_handle::WindowHandle::borrow_raw(raw_window_handle);
 
@@ -98,7 +99,9 @@ impl PluginUiImpl {
                                     payload: Err(format!("failed to parse request: {}", err)),
                                 };
                                 warn!("failed to parse request: {}", err);
-                                response_sender.send(response).unwrap();
+                                if let Err(err) = response_sender.send(response) {
+                                    error!("failed to send response: {}", err);
+                                }
                             } else {
                                 error!("failed to parse request: {}", err);
                             }
@@ -113,26 +116,32 @@ impl PluginUiImpl {
                             Err(err) => Err(err.to_string()),
                         },
                     };
-                    response_sender.send(response).unwrap();
+                    if let Err(err) = response_sender.send(response) {
+                        error!("failed to send response: {}", err);
+                    }
                 });
             });
 
+        #[cfg(target_os = "linux")]
+        {
+            gtk::init().unwrap();
+        }
         let window = window_builder.build().unwrap();
         let window = Arc::new(window);
 
-        PluginUiImpl {
+        Ok(PluginUiImpl {
             raw_window_handle,
             window,
 
             notification_receiver,
             response_receiver,
-        }
+        })
     }
 
-    pub fn idle(&mut self) {
+    pub fn idle(&mut self) -> Result<()> {
         while let Ok(message) = self.response_receiver.try_recv() {
             let js = PluginUiImpl::response_to_js(&message);
-            self.window.evaluate_script(&js).unwrap();
+            self.window.evaluate_script(&js)?;
         }
 
         if let Ok(notification) = self.notification_receiver.try_recv() {
@@ -140,8 +149,10 @@ impl PluginUiImpl {
                 r#"window.onIpcNotification({})"#,
                 serde_json::to_string(&notification).unwrap()
             );
-            self.window.evaluate_script(&js).unwrap();
+            self.window.evaluate_script(&js)?;
         }
+
+        Ok(())
     }
 
     pub fn get_native_window_handle(&self) -> usize {
@@ -151,13 +162,13 @@ impl PluginUiImpl {
         }
     }
 
-    pub fn set_size(&self, width: usize, height: usize) {
-        self.window
-            .set_bounds(wry::Rect {
-                position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
-                size: winit::dpi::LogicalSize::new(width as f64, height as f64).into(),
-            })
-            .unwrap();
+    pub fn set_size(&self, width: usize, height: usize) -> Result<()> {
+        self.window.set_bounds(wry::Rect {
+            position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
+            size: winit::dpi::LogicalSize::new(width as f64, height as f64).into(),
+        })?;
+
+        Ok(())
     }
 
     async fn handle_request(

@@ -1,7 +1,6 @@
 #include "DistrhoUI.hpp"
 #include "plugin.hpp"
 #include "rust.generated.hpp"
-#include <vector>
 
 START_NAMESPACE_DISTRHO
 

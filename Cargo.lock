@@ -4242,6 +4242,7 @@ dependencies = [
  "base64",
  "bincode",
  "embed-resource",
+ "gtk",
  "include_dir",
  "mime_guess",
  "raw-window-handle",
