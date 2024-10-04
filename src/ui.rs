@@ -13,6 +13,8 @@ pub struct PluginUiImpl {
     raw_window_handle: raw_window_handle::RawWindowHandle,
     window: Arc<wry::WebView>,
 
+    _data_dir: tempfile::TempDir,
+
     notification_receiver: UnboundedReceiver<UiNotification>,
     response_receiver: UnboundedReceiver<Response>,
 }
@@ -45,8 +47,11 @@ impl PluginUiImpl {
 
         let plugin_ref = Arc::clone(&plugin);
 
+        let temp_dir = tempfile::TempDir::new()?;
+        let mut web_context = wry::WebContext::new(Some(temp_dir.path().to_path_buf()));
         let window_builder = wry::WebViewBuilder::new(&window_handle)
             .with_background_color((165, 212, 173, 255))
+            .with_web_context(&mut web_context)
             .with_custom_protocol("app".to_string(), |request| {
                 let path = request.uri().path();
                 EDITOR
@@ -132,6 +137,8 @@ impl PluginUiImpl {
         Ok(PluginUiImpl {
             raw_window_handle,
             window,
+
+            _data_dir: temp_dir,
 
             notification_receiver,
             response_receiver,
