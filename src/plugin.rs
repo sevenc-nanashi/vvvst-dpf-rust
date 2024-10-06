@@ -238,6 +238,11 @@ impl PluginImpl {
         is_playing: bool,
         current_sample: usize,
     ) {
+        for output in outputs.iter_mut() {
+            for sample in output.iter_mut() {
+                *sample = 0.0;
+            }
+        }
         if let Ok(mut this) = this_ref.try_lock() {
             if let Ok(mix) = this.mix.try_read() {
                 let samples = &mix.samples;
