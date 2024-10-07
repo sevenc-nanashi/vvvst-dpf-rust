@@ -68,7 +68,8 @@ protected:
   /**
      Run/process function for plugins without MIDI input.
    */
-  void run(const float **inputs, float **outputs, uint32_t frames) override;
+  void run(const float **inputs, float **outputs, uint32_t frames,
+           const MidiEvent *midiEvents, uint32_t midiEventCount) override;
 
   // -------------------------------------------------------------------------------------------------------
 

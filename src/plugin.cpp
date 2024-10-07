@@ -12,27 +12,33 @@ VvvstPlugin::~VvvstPlugin() { Rust::plugin_drop(inner); }
    A plugin label follows the same rules as Parameter::symbol, with the
    exception that it can start with numbers.
  */
-const char *VvvstPlugin::getLabel() const { return "vvvst"; }
+const char *VvvstPlugin::getLabel() const {
+#ifdef DEBUG
+  return "vvvst_debug";
+#else
+  return "vvvst";
+#endif
+}
 
 /**
    Get an extensive comment/description about the plugin.
  */
 const char *VvvstPlugin::getDescription() const {
-  return "VOICEVOXのVSTプラグインです。";
+  return "VST plugin for Voicevox.";
 }
 
 /**
    Get the plugin author/maker.
  */
 const char *VvvstPlugin::getMaker() const {
-  return "Nanashi. <https://sevenc7c.com>";
+  return "Nanashi. (https://sevenc7c.com)";
 }
 
 /**
    Get the plugin homepage.
  */
 const char *VvvstPlugin::getHomePage() const {
-  return "https://github.com/sevenc-nanashi/vvvst-rust-dpf";
+  return "https://github.com/sevenc-nanashi/vvvst-rust-dpf/";
 }
 
 /**
@@ -87,7 +93,8 @@ String VvvstPlugin::getState(const char *key) const {
 /**
    Run/process function for plugins without MIDI input.
  */
-void VvvstPlugin::run(const float **inputs, float **outputs, uint32_t frames) {
+void VvvstPlugin::run(const float **inputs, float **outputs, uint32_t frames,
+                      const MidiEvent *_midiEvents, uint32_t _midiEventCount) {
   auto sampleRate = this->getSampleRate();
   auto timePosition = this->getTimePosition();
   auto samplePosition = timePosition.frame;
