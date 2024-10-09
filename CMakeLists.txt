@@ -23,7 +23,7 @@ corrosion_import_crate(
   PROFILE ${RUST_PROFILE}
   CRATES vvvst-dpf-rust)
 
-# MSVC専用：utf-8を使う
+# Windows：utf-8を使う
 if(MSVC)
   add_compile_options("/utf-8")
 endif()
@@ -35,13 +35,18 @@ dpf_add_plugin(
   FILES_DSP src/plugin.cpp
   FILES_UI src/ui.cpp)
 
-if(APPLE)
+if(MSVC)
+  # Windows：manifestを埋め込む
+  target_sources(${VVVST_NAME}-vst3 PRIVATE "./resources/vvvst.manifest")
+elseif(APPLE)
+  # Mac：色々リンクする
   enable_language(OBJC)
   target_link_libraries(${VVVST_NAME} PRIVATE "-framework CoreFoundation")
   target_link_libraries(${VVVST_NAME} PRIVATE "-framework CoreGraphics")
   target_link_libraries(${VVVST_NAME} PRIVATE "-framework AppKit")
   target_link_libraries(${VVVST_NAME} PRIVATE "-framework QuartzCore")
-  set_target_properties(${VVVST_NAME} PROPERTIES LINK_FLAGS "-Wl,-F/Library/Frameworks")
+  set_target_properties(${VVVST_NAME} PROPERTIES LINK_FLAGS
+                                                 "-Wl,-F/Library/Frameworks")
 endif()
 
 target_link_libraries(${VVVST_NAME} PRIVATE vvvst_dpf_rust)

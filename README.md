@@ -9,6 +9,7 @@ Issue：<https://github.com/VOICEVOX/voicevox_project/issues/45>
 
 - エディタをクローンして`npm run vst:serve`すると VST 用のエディタが立ち上がります
 - Release ビルドするときはエディタを`npm run vst:build`し、`dist`内を`resources/editor`にコピーしてください
+- `cargo xtask` に色々置いてあります
 
 ## ビルド
 

@@ -1,2 +1,4 @@
 #define RT_MANIFEST 24
-1 RT_MANIFEST "vvvst.manifest"
+#define ISOLATIONAWARE_MANIFEST_RESOURCE_ID 2
+// https://learn.microsoft.com/en-us/previous-versions//ms649781(v=vs.85)#using-comctl32-version-6-in-an-application-that-uses-extensions-plug-ins-or-a-dll-that-is-brought-into-a-process
+ISOLATIONAWARE_MANIFEST_RESOURCE_ID RT_MANIFEST "vvvst.manifest"
