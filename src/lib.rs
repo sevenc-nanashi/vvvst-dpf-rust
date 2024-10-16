@@ -2,6 +2,7 @@ mod common;
 mod model;
 mod plugin;
 mod ui;
+mod saturating_ext;
 
 use crate::common::RUNTIME;
 use std::sync::Arc;

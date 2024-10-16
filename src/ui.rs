@@ -357,6 +357,10 @@ impl PluginUiImpl {
                         .position(|button| button == &custom_text),
                 )?);
             }
+
+            _ => {
+                unimplemented!();
+            }
         }
     }
 

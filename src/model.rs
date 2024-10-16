@@ -1,10 +1,12 @@
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SingingVoiceKey(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TrackId(pub String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RequestId(pub u32);
@@ -34,6 +36,8 @@ pub enum RequestInner {
     SetProject(String),
     SetPhrases(Vec<Phrase>),
     SetVoices(HashMap<SingingVoiceKey, String>),
+    SetTracks(HashMap<TrackId, Track>),
+    SetRouting(HashMap<TrackId, u32>),
 
     ShowMessageDialog(ShowMessageDialog),
     ShowImportFileDialog(ShowImportFileDialog),
@@ -96,4 +100,29 @@ pub struct ShowQuestionDialog {
     pub cancel_id: Option<usize>,
     #[serde(default)]
     pub default_id: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Track {
+    pub name: String,
+
+    pub solo: bool,
+    pub mute: bool,
+    pub pan: f32,
+    pub gain: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Routing {
+    pub channel_mode: ChannelMode,
+    pub channel_index: HashMap<TrackId, u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChannelMode {
+    Mono,
+    Stereo,
 }
