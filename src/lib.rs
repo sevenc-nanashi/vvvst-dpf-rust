@@ -1,10 +1,11 @@
 mod common;
 mod model;
 mod plugin;
-mod ui;
 mod saturating_ext;
+mod ui;
 
 use crate::common::RUNTIME;
+use common::NUM_CHANNELS;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::error;
@@ -25,7 +26,7 @@ pub struct Version {
 }
 
 #[no_mangle]
-unsafe extern "C" fn get_version() -> Version {
+unsafe extern "C-unwind" fn get_version() -> Version {
     let version = env!("CARGO_PKG_VERSION");
     let version_split = version.split('.').collect::<Vec<_>>();
     let major = version_split[0].parse::<u8>().unwrap();
@@ -40,7 +41,7 @@ unsafe extern "C" fn get_version() -> Version {
 }
 
 #[no_mangle]
-unsafe extern "C" fn get_plugin_name() -> *const std::os::raw::c_char {
+unsafe extern "C-unwind" fn get_plugin_name() -> *const std::os::raw::c_char {
     let name = format!(
         "{}-{}",
         env!("CARGO_PKG_NAME"),
@@ -56,7 +57,7 @@ unsafe extern "C" fn get_plugin_name() -> *const std::os::raw::c_char {
 }
 
 #[no_mangle]
-unsafe extern "C" fn cstring_drop(s: *mut std::os::raw::c_char) {
+unsafe extern "C-unwind" fn cstring_drop(s: *mut std::os::raw::c_char) {
     if s.is_null() {
         return;
     }
@@ -65,21 +66,21 @@ unsafe extern "C" fn cstring_drop(s: *mut std::os::raw::c_char) {
 }
 
 #[no_mangle]
-unsafe extern "C" fn plugin_new() -> *mut Plugin {
+unsafe extern "C-unwind" fn plugin_new() -> *mut Plugin {
     Box::into_raw(Box::new(Plugin {
         inner: Arc::new(Mutex::new(plugin::PluginImpl::new(Default::default()))),
     }))
 }
 
 #[no_mangle]
-unsafe extern "C" fn plugin_set_state(plugin: &Plugin, state: *const std::ffi::c_char) {
+unsafe extern "C-unwind" fn plugin_set_state(plugin: &Plugin, state: *const std::ffi::c_char) {
     let plugin = RUNTIME.block_on(plugin.inner.lock());
     let state = std::ffi::CStr::from_ptr(state).to_str().unwrap();
     RUNTIME.block_on(plugin.set_state(state));
 }
 
 #[no_mangle]
-unsafe extern "C" fn plugin_get_state(plugin: &Plugin) -> *mut std::os::raw::c_char {
+unsafe extern "C-unwind" fn plugin_get_state(plugin: &Plugin) -> *mut std::os::raw::c_char {
     let plugin = RUNTIME.block_on(plugin.inner.lock());
     let state = RUNTIME.block_on(plugin.get_state());
     let state = std::ffi::CString::new(state).unwrap();
@@ -87,7 +88,7 @@ unsafe extern "C" fn plugin_get_state(plugin: &Plugin) -> *mut std::os::raw::c_c
 }
 
 #[no_mangle]
-unsafe extern "C" fn plugin_run(
+unsafe extern "C-unwind" fn plugin_run(
     plugin: &Plugin,
     outputs: *mut *mut f32,
     sample_rate: f32,
@@ -95,7 +96,7 @@ unsafe extern "C" fn plugin_run(
     is_playing: bool,
     current_sample: usize,
 ) {
-    let mut outputs = std::slice::from_raw_parts_mut(outputs, 2)
+    let mut outputs = std::slice::from_raw_parts_mut(outputs, NUM_CHANNELS as usize)
         .iter_mut()
         .map(|&mut ptr| std::slice::from_raw_parts_mut(ptr, sample_count))
         .collect::<Vec<_>>();
@@ -111,7 +112,7 @@ unsafe extern "C" fn plugin_run(
 }
 
 #[no_mangle]
-unsafe extern "C" fn plugin_drop(plugin: *mut Plugin) {
+unsafe extern "C-unwind" fn plugin_drop(plugin: *mut Plugin) {
     if plugin.is_null() {
         return;
     }
@@ -121,7 +122,7 @@ unsafe extern "C" fn plugin_drop(plugin: *mut Plugin) {
 }
 
 #[no_mangle]
-unsafe extern "C" fn plugin_ui_new(handle: usize, plugin: &Plugin) -> *mut PluginUi {
+unsafe extern "C-unwind" fn plugin_ui_new(handle: usize, plugin: &Plugin) -> *mut PluginUi {
     let plugin_ref = Arc::clone(&plugin.inner);
     let plugin_ui = match ui::PluginUiImpl::new(handle, plugin_ref) {
         Ok(plugin_ui) => plugin_ui,
@@ -137,13 +138,13 @@ unsafe extern "C" fn plugin_ui_new(handle: usize, plugin: &Plugin) -> *mut Plugi
 }
 
 #[no_mangle]
-unsafe extern "C" fn plugin_ui_get_native_window_handle(plugin_ui: &PluginUi) -> usize {
+unsafe extern "C-unwind" fn plugin_ui_get_native_window_handle(plugin_ui: &PluginUi) -> usize {
     let plugin_ui = RUNTIME.block_on(plugin_ui.inner.lock());
     plugin_ui.get_native_window_handle()
 }
 
 #[no_mangle]
-unsafe extern "C" fn plugin_ui_set_size(plugin_ui: &PluginUi, width: usize, height: usize) {
+unsafe extern "C-unwind" fn plugin_ui_set_size(plugin_ui: &PluginUi, width: usize, height: usize) {
     let plugin_ui = RUNTIME.block_on(plugin_ui.inner.lock());
     if let Err(err) = plugin_ui.set_size(width, height) {
         error!("Failed to set size: {}", err);
@@ -151,7 +152,7 @@ unsafe extern "C" fn plugin_ui_set_size(plugin_ui: &PluginUi, width: usize, heig
 }
 
 #[no_mangle]
-unsafe extern "C" fn plugin_ui_idle(plugin_ui: &PluginUi) {
+unsafe extern "C-unwind" fn plugin_ui_idle(plugin_ui: &PluginUi) {
     let mut plugin_ui = RUNTIME.block_on(plugin_ui.inner.lock());
     if let Err(err) = plugin_ui.idle() {
         error!("Idle callback failed: {}", err);
@@ -159,7 +160,7 @@ unsafe extern "C" fn plugin_ui_idle(plugin_ui: &PluginUi) {
 }
 
 #[no_mangle]
-unsafe extern "C" fn plugin_ui_drop(plugin_ui: *mut PluginUi) {
+unsafe extern "C-unwind" fn plugin_ui_drop(plugin_ui: *mut PluginUi) {
     if plugin_ui.is_null() {
         return;
     }

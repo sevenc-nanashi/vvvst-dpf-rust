@@ -1,6 +1,9 @@
-use crate::common::RUNTIME;
-use crate::model::{Phrase, SingingVoiceKey};
-use crate::ui::UiNotification;
+use crate::{
+    common::RUNTIME,
+    model::{ChannelMode, Phrase, Routing, SingingVoiceKey, Track, TrackId},
+    saturating_ext::SaturatingMath,
+    ui::UiNotification,
+};
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
 use serde::{
     de::{MapAccess, Visitor},
@@ -31,14 +34,16 @@ impl std::fmt::Debug for PluginImpl {
 }
 
 pub struct Mixes {
-    pub samples: Vec<f32>,
+    pub samples: HashMap<TrackId, Vec<f32>>,
     pub sample_rate: f32,
+    pub samples_len: usize,
 }
 impl Default for Mixes {
     fn default() -> Self {
         Mixes {
-            samples: Vec::new(),
+            samples: HashMap::new(),
             sample_rate: 44100.0,
+            samples_len: 0,
         }
     }
 }
@@ -47,6 +52,8 @@ impl Default for Mixes {
 pub struct PluginParams {
     pub project: Option<String>,
     pub phrases: Vec<Phrase>,
+    pub tracks: HashMap<TrackId, Track>,
+    pub routing: Routing,
 
     #[serde(
         serialize_with = "serialize_voices",
@@ -168,9 +175,16 @@ impl PluginImpl {
             .iter()
             .map(|phrase| phrase.start)
             .fold(0.0, f32::max);
-        let mut new_samples = vec![0.0; (max_start * new_sample_rate) as usize];
+        let mut new_samples = HashMap::new();
+        let mut samples_len = (max_start * new_sample_rate) as usize;
+        for track_id in params.tracks.keys() {
+            new_samples.insert(track_id.clone(), vec![0.0; samples_len]);
+        }
         for phrase in phrases {
             if let Some(voice) = voices.get(&phrase.voice) {
+                let Some(new_samples) = new_samples.get_mut(&phrase.track_id) else {
+                    continue;
+                };
                 let mut wav = wav_io::reader::Reader::from_vec(voice.clone()).unwrap();
                 let header = wav.read_header().unwrap();
                 let base_samples = wav.get_samples_f32().unwrap();
@@ -190,6 +204,9 @@ impl PluginImpl {
 
                 if end > new_samples.len() as isize {
                     new_samples.resize(end as usize, 0.0);
+                    if end as usize > samples_len {
+                        samples_len = end as usize;
+                    }
                 }
                 for i in 0..samples.len() {
                     let frame = start + i as isize;
@@ -197,21 +214,20 @@ impl PluginImpl {
                         continue;
                     }
                     let frame = frame as usize;
-                    if new_samples[frame] > f32::MAX - samples[i] {
-                        new_samples[frame] = f32::MAX;
-                    } else if new_samples[frame] < f32::MIN - samples[i] {
-                        new_samples[frame] = f32::MIN;
-                    } else {
-                        new_samples[frame] += samples[i];
-                    }
+                    new_samples[frame] = new_samples[frame].saturating_add(samples[i]);
                 }
             }
         }
 
-        info!("mixes updated, {} samples", new_samples.len());
+        info!(
+            "mixes updated, {} tracks, {} samples",
+            new_samples.len(),
+            samples_len
+        );
 
         mix.samples = new_samples;
         mix.sample_rate = new_sample_rate;
+        mix.samples_len = samples_len;
     }
 
     // メモ：DPFはバイナリ文字列を扱えないので、base64エンコードを挟む
@@ -244,9 +260,9 @@ impl PluginImpl {
             }
         }
         if let Ok(mut this) = this_ref.try_lock() {
-            if let Ok(mix) = this.mix.try_read() {
+            if let (Ok(mix), Ok(params)) = (this.mix.try_read(), this.params.try_read()) {
                 let samples = &mix.samples;
-                if samples.is_empty() {
+                if samples.is_empty() || mix.samples_len == 0 {
                     return;
                 }
                 if mix.sample_rate != sample_rate {
@@ -263,18 +279,58 @@ impl PluginImpl {
                 if is_playing {
                     for i in 0..outputs[0].len() {
                         let current_frame = current_sample + i;
-                        if current_frame < samples.len() {
-                            outputs[0][i] = samples[current_frame];
-                            outputs[1][i] = samples[current_frame];
-                        } else {
-                            outputs[0][i] = 0.0;
-                            outputs[1][i] = 0.0;
+                        if current_frame < mix.samples_len {
+                            for (track_id, track) in params.tracks.iter() {
+                                let Some(track_samples) = &samples.get(track_id) else {
+                                    continue;
+                                };
+
+                                if current_frame >= track_samples.len() {
+                                    continue;
+                                }
+
+                                let Some(&channel_index) =
+                                    params.routing.channel_index.get(track_id)
+                                else {
+                                    continue;
+                                };
+                                let channel_index = channel_index as usize;
+                                match params.routing.channel_mode {
+                                    ChannelMode::Mono => {
+                                        outputs[channel_index][i] = outputs[channel_index][i]
+                                            .saturating_add(
+                                                track_samples[current_frame] * track.gain,
+                                            );
+                                    }
+                                    ChannelMode::Stereo => {
+                                        let (left_multiplier, right_multiplier) = if track.pan < 0.0
+                                        {
+                                            (1.0, 1.0 + track.pan)
+                                        } else {
+                                            (1.0 - track.pan, 1.0)
+                                        };
+                                        outputs[channel_index * 2][i] =
+                                            outputs[channel_index * 2][i].saturating_add(
+                                                track_samples[current_frame]
+                                                    * track.gain
+                                                    * left_multiplier,
+                                            );
+                                        outputs[channel_index * 2 + 1][i] =
+                                            outputs[channel_index * 2 + 1][i].saturating_add(
+                                                track_samples[current_frame]
+                                                    * track.gain
+                                                    * right_multiplier,
+                                            );
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            if this.prev_position.abs_diff(current_sample) > (sample_rate / 10.0) as usize {
+            if this.prev_position.abs_diff(current_sample) > (sample_rate * 0.25) as usize {
+                this.prev_position = current_sample;
                 if let Some(sender) = &this.notification_sender {
                     if sender
                         .send(UiNotification::UpdatePosition(

@@ -2,6 +2,8 @@
 #include "DistrhoDetails.hpp"
 #include "DistrhoPlugin.hpp"
 #include "rust.generated.hpp"
+#include <format>
+#include <string>
 // -----------------------------------------------------------------------------------------------------------
 
 VvvstPlugin::VvvstPlugin() : Plugin(0, 0, 1) { inner = Rust::plugin_new(); }
@@ -64,11 +66,12 @@ uint32_t VvvstPlugin::getVersion() const {
    This function will be called once, shortly after the plugin is created.
  */
 void VvvstPlugin::initAudioPort(bool input, uint32_t index, AudioPort &port) {
-  // treat meter audio ports as stereo
-  port.groupId = kPortGroupStereo;
+  port.groupId = index / 2;
+  auto name = std::format("Channel {}", index / 2 + 1);
+  port.name = String(name.c_str());
 
-  // everything else is as default
-  Plugin::initAudioPort(input, index, port);
+  auto symbol = std::format("channel_{}", index / 2 + 1);
+  port.symbol = String(symbol.c_str());
 }
 
 void VvvstPlugin::initState(uint32_t index, State &state) {

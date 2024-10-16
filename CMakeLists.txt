@@ -21,6 +21,7 @@ endif()
 corrosion_import_crate(
   MANIFEST_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
   PROFILE ${RUST_PROFILE}
+  FEATURES static_link_windows
   CRATES vvvst-dpf-rust)
 
 # Windows：utf-8を使う
@@ -51,4 +52,4 @@ endif()
 
 target_link_libraries(${VVVST_NAME} PRIVATE vvvst_dpf_rust)
 target_include_directories(${VVVST_NAME} PUBLIC "src" "deps")
-target_compile_features(${VVVST_NAME} PUBLIC cxx_std_17)
+target_compile_features(${VVVST_NAME} PUBLIC cxx_std_20)

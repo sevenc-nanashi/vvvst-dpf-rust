@@ -2,12 +2,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SingingVoiceKey(pub String);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TrackId(pub String);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RequestId(pub u32);
 
@@ -37,7 +31,8 @@ pub enum RequestInner {
     SetPhrases(Vec<Phrase>),
     SetVoices(HashMap<SingingVoiceKey, String>),
     SetTracks(HashMap<TrackId, Track>),
-    SetRouting(HashMap<TrackId, u32>),
+    SetRouting(Routing),
+    GetRouting,
 
     ShowMessageDialog(ShowMessageDialog),
     ShowImportFileDialog(ShowImportFileDialog),
@@ -47,6 +42,13 @@ pub enum RequestInner {
 
     ExportProject,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SingingVoiceKey(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TrackId(pub String);
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,6 +64,7 @@ pub struct ShowImportFileDialog {
 #[serde(rename_all = "camelCase")]
 pub struct Phrase {
     pub start: f32,
+    pub track_id: TrackId,
     pub voice: SingingVoiceKey,
 }
 
@@ -113,16 +116,17 @@ pub struct Track {
     pub gain: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Routing {
     pub channel_mode: ChannelMode,
     pub channel_index: HashMap<TrackId, u8>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum ChannelMode {
     Mono,
+    #[default]
     Stereo,
 }

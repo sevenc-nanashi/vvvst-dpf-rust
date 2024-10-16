@@ -1,6 +1,8 @@
-use crate::common::RUNTIME;
-use crate::model::*;
-use crate::plugin::PluginImpl;
+use crate::{
+    common::{NUM_CHANNELS, RUNTIME},
+    model::*,
+    plugin::PluginImpl,
+};
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -358,8 +360,35 @@ impl PluginUiImpl {
                 )?);
             }
 
-            _ => {
-                unimplemented!();
+            RequestInner::GetRouting => {
+                let routing = params.read().await.routing.clone();
+                Ok(serde_json::to_value(routing)?)
+            }
+
+            RequestInner::SetRouting(routing) => {
+                let mut params = params.write().await;
+                params.routing = routing.clone();
+                Ok(serde_json::Value::Null)
+            }
+
+            RequestInner::SetTracks(tracks) => {
+                let mut params = params.write().await;
+                params.tracks = tracks.clone();
+                let mut new_channel_index = params.routing.channel_index.clone();
+                new_channel_index.retain(|track_id, _index| tracks.contains_key(&track_id));
+                let num_channels = if params.routing.channel_mode == ChannelMode::Mono {
+                    NUM_CHANNELS
+                } else {
+                    NUM_CHANNELS / 2
+                };
+                for (i, track_id) in tracks.keys().enumerate() {
+                    if !new_channel_index.contains_key(&track_id) {
+                        new_channel_index.insert(track_id.clone(), (i % (num_channels as usize)) as u8);
+                    }
+                }
+
+                params.routing.channel_index = new_channel_index;
+                Ok(serde_json::Value::Null)
             }
         }
     }

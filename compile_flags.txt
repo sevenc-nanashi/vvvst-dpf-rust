@@ -1,4 +1,4 @@
 -xc++
--std=c++17
+-std=c++20
 -I./deps/DPF/distrho
 -I./deps

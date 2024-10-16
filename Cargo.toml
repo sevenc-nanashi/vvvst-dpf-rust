@@ -6,6 +6,9 @@ edition = "2021"
 [workspace]
 members = ["xtask"]
 
+[features]
+static_link_windows = []
+
 [dependencies]
 anyhow = "1.0.89"
 base64 = "0.22.1"

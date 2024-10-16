@@ -14,7 +14,8 @@
       "kwargs": {
         "MANIFEST_PATH": "*",
         "PROFILE": 1,
-        "CRATES": "*"
+        "CRATES": "*",
+        "FEATURES": "*"
       }
     }
   }
