@@ -90,7 +90,7 @@ jobs:
             name: "windows"
           - os: macos-latest
             name: "macos"
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             name: "linux"
     runs-on: ${{ matrix.os }}
     steps:
