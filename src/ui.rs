@@ -306,59 +306,6 @@ impl PluginUiImpl {
                     return Ok(serde_json::Value::Bool(false));
                 }
             }
-            RequestInner::ShowMessageDialog(params) => {
-                let dialog = rfd::AsyncMessageDialog::new()
-                    .set_title(&params.title)
-                    .set_description(&params.message)
-                    .set_buttons(rfd::MessageButtons::Ok);
-                let dialog = match params.r#type {
-                    DialogType::Info => dialog.set_level(rfd::MessageLevel::Info),
-                    DialogType::Warning => dialog.set_level(rfd::MessageLevel::Warning),
-                    DialogType::Error => dialog.set_level(rfd::MessageLevel::Error),
-                    _ => dialog,
-                };
-                dialog.show().await;
-
-                return Ok(serde_json::Value::Null);
-            }
-            RequestInner::ShowQuestionDialog(params) => {
-                anyhow::ensure!(
-                    (1..=3).contains(&params.buttons.len()),
-                    "The number of buttons must be 1 to 3"
-                );
-                let dialog = rfd::AsyncMessageDialog::new()
-                    .set_title(&params.title)
-                    .set_description(&params.message);
-                let dialog = match params.r#type {
-                    DialogType::Info => dialog.set_level(rfd::MessageLevel::Info),
-                    DialogType::Warning => dialog.set_level(rfd::MessageLevel::Warning),
-                    DialogType::Error => dialog.set_level(rfd::MessageLevel::Error),
-                    _ => dialog,
-                };
-                let dialog = dialog.set_buttons(match params.buttons.len() {
-                    1 => rfd::MessageButtons::OkCustom(params.buttons[0].clone()),
-                    2 => rfd::MessageButtons::OkCancelCustom(
-                        params.buttons[0].clone(),
-                        params.buttons[1].clone(),
-                    ),
-                    3 => rfd::MessageButtons::YesNoCancelCustom(
-                        params.buttons[0].clone(),
-                        params.buttons[1].clone(),
-                        params.buttons[2].clone(),
-                    ),
-                    _ => unreachable!(),
-                });
-                let result = dialog.show().await;
-                let rfd::MessageDialogResult::Custom(custom_text) = result else {
-                    anyhow::bail!("Unexpected dialog result: {:?}", result);
-                };
-                return Ok(serde_json::to_value(
-                    params
-                        .buttons
-                        .iter()
-                        .position(|button| button == &custom_text),
-                )?);
-            }
 
             RequestInner::GetRouting => {
                 let routing = params.read().await.routing.clone();
@@ -383,7 +330,8 @@ impl PluginUiImpl {
                 };
                 for (i, track_id) in tracks.keys().enumerate() {
                     if !new_channel_index.contains_key(&track_id) {
-                        new_channel_index.insert(track_id.clone(), (i % (num_channels as usize)) as u8);
+                        new_channel_index
+                            .insert(track_id.clone(), (i % (num_channels as usize)) as u8);
                     }
                 }
 

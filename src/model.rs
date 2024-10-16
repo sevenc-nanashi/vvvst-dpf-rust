@@ -34,9 +34,7 @@ pub enum RequestInner {
     SetRouting(Routing),
     GetRouting,
 
-    ShowMessageDialog(ShowMessageDialog),
     ShowImportFileDialog(ShowImportFileDialog),
-    ShowQuestionDialog(ShowQuestionDialog),
 
     ReadFile(String),
 
@@ -72,37 +70,6 @@ pub struct Phrase {
 #[serde(rename_all = "camelCase")]
 pub struct SetPhraseResult {
     pub missing_voices: Vec<SingingVoiceKey>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ShowMessageDialog {
-    pub r#type: DialogType,
-    pub title: String,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DialogType {
-    None,
-    Info,
-    Warning,
-    Error,
-    Question,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ShowQuestionDialog {
-    pub r#type: DialogType,
-    pub title: String,
-    pub message: String,
-    pub buttons: Vec<String>,
-    #[serde(default)]
-    pub cancel_id: Option<usize>,
-    #[serde(default)]
-    pub default_id: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
