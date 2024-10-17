@@ -323,15 +323,9 @@ impl PluginUiImpl {
                 params.tracks = tracks.clone();
                 let mut new_channel_index = params.routing.channel_index.clone();
                 new_channel_index.retain(|track_id, _index| tracks.contains_key(&track_id));
-                let num_channels = if params.routing.channel_mode == ChannelMode::Mono {
-                    NUM_CHANNELS
-                } else {
-                    NUM_CHANNELS / 2
-                };
-                for (i, track_id) in tracks.keys().enumerate() {
+                for track_id in tracks.keys() {
                     if !new_channel_index.contains_key(&track_id) {
-                        new_channel_index
-                            .insert(track_id.clone(), (i % (num_channels as usize)) as u8);
+                        new_channel_index.insert(track_id.clone(), 0);
                     }
                 }
 
