@@ -329,7 +329,7 @@ impl PluginImpl {
                 }
             }
 
-            if this.prev_position.abs_diff(current_sample) > (sample_rate * 0.25) as usize {
+            if this.prev_position.abs_diff(current_sample) > (sample_rate * 0.1) as usize {
                 this.prev_position = current_sample;
                 if let Some(sender) = &this.notification_sender {
                     if sender
