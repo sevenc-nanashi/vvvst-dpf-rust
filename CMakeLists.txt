@@ -36,10 +36,7 @@ dpf_add_plugin(
   FILES_DSP src/plugin.cpp
   FILES_UI src/ui.cpp)
 
-if(MSVC)
-  # Windows：manifestを埋め込む
-  target_sources(${VVVST_NAME}-vst3 PRIVATE "./resources/vvvst.manifest")
-elseif(APPLE)
+if(APPLE)
   # Mac：色々リンクする
   enable_language(OBJC)
   target_link_libraries(${VVVST_NAME} PRIVATE "-framework CoreFoundation")
