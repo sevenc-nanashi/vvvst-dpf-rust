@@ -76,7 +76,7 @@ unsafe extern "C-unwind" fn plugin_new() -> *mut Plugin {
 unsafe extern "C-unwind" fn plugin_set_state(plugin: &Plugin, state: *const std::ffi::c_char) {
     let plugin = RUNTIME.block_on(plugin.inner.lock());
     let state = std::ffi::CStr::from_ptr(state).to_str().unwrap();
-    RUNTIME.block_on(plugin.set_state(state));
+    let _ = RUNTIME.block_on(plugin.set_state(state));
 }
 
 #[no_mangle]

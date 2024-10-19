@@ -4,6 +4,7 @@ use crate::{
     saturating_ext::SaturatingMath,
     ui::UiNotification,
 };
+use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
 use serde::{
     de::{MapAccess, Visitor},
@@ -42,7 +43,7 @@ impl Default for Mixes {
     fn default() -> Self {
         Mixes {
             samples: HashMap::new(),
-            sample_rate: 44100.0,
+            sample_rate: 0.0,
             samples_len: 0,
         }
     }
@@ -231,15 +232,16 @@ impl PluginImpl {
     }
 
     // メモ：DPFはバイナリ文字列を扱えないので、base64エンコードを挟む
-    pub async fn set_state(&self, state_base64: &str) {
+    pub async fn set_state(&self, state_base64: &str) -> Result<()> {
         if state_base64.is_empty() {
-            return;
+            return Ok(());
         }
         let mut params = self.params.write().await;
-        let state = base64.decode(state_base64).unwrap();
-        if let Ok(loaded_params) = bincode::deserialize(&state) {
-            *params = loaded_params;
-        }
+        let state = base64.decode(state_base64)?;
+        let loaded_params = bincode::deserialize(&state)?;
+        *params = loaded_params;
+
+        Ok(())
     }
 
     pub async fn get_state(&self) -> String {
