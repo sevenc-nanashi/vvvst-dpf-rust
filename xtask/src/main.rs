@@ -4,7 +4,19 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
+
+macro_rules! green_log {
+    ($subject:expr, $($args:tt)+) => {
+        println!("{:>12} {}", $subject.bold().green(), &format!($($args)*));
+    };
+}
+macro_rules! blue_log {
+    ($subject:expr, $($args:tt)+) => {
+        println!("{:>12} {}", $subject.bold().cyan(), &format!($($args)*));
+    };
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -50,10 +62,9 @@ fn generate_header() {
     let destination_path = main_crate.join("src/rust.generated.hpp");
     bindings.write_to_file(&destination_path);
 
-    println!("Generated bindings to {:?}", destination_path);
+    green_log!("Finished", "generated to {:?}", destination_path,);
 }
 fn build(args: BuildArgs) {
-    println!("Building...");
     let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
@@ -77,13 +88,22 @@ fn build(args: BuildArgs) {
     if args.log {
         envs.insert("VVVST_LOG".to_string(), "1".to_string());
     }
-    if let Some(dev_server_url) = args.dev_server_url {
-        envs.insert("VVVST_DEV_SERVER_URL".to_string(), dev_server_url);
+    if let Some(ref dev_server_url) = args.dev_server_url {
+        envs.insert("VVVST_DEV_SERVER_URL".to_string(), dev_server_url.clone());
     }
 
     let build_name = if args.release { "release" } else { "debug" };
+    green_log!(
+        "Building",
+        "log: {}, dev_server_url: {:?}, release: {}",
+        args.log,
+        args.dev_server_url,
+        args.release
+    );
 
     let destination_path = main_crate.join("build").join(build_name);
+
+    let current = std::time::Instant::now();
 
     let build_type = format!(
         "-DCMAKE_BUILD_TYPE={}",
@@ -102,19 +122,36 @@ fn build(args: BuildArgs) {
     } else {
         duct::cmd!("cmake", &build_type, &build_dir)
     }
+    .before_spawn(|command| {
+        blue_log!("Running", "{:?}", command);
+
+        Ok(())
+    })
     .dir(main_crate)
     .run()
     .unwrap();
     duct::cmd!("cmake", "--build", &destination_path)
         .dir(main_crate)
+        .before_spawn(|command| {
+            blue_log!("Running", "{:?}", command);
+
+            Ok(())
+        })
         .full_env(envs)
         .run()
         .unwrap();
 
-    println!("Built to {:?}", &destination_path);
-    println!("Plugin dir: {:?}", destination_path.join("bin"));
+    let elapsed = current.elapsed();
+    green_log!(
+        "Finished",
+        "in {}.{:03}s",
+        elapsed.as_secs(),
+        elapsed.subsec_millis()
+    );
+    green_log!("", "destination: {:?}", &destination_path);
+    green_log!("", "plugin: {:?}", destination_path.join("bin"),);
     if args.log {
-        println!("Logs dir: {:?}", main_crate.join("logs"));
+        green_log!("", "logs: {:?}", main_crate.join("logs"));
     }
 }
 
@@ -137,6 +174,8 @@ impl PartialEq for License {
 }
 
 fn generate_licenses() {
+    let current = std::time::Instant::now();
+
     let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
@@ -195,9 +234,17 @@ fn generate_licenses() {
     let licenses_json = serde_json::to_string_pretty(&licenses).unwrap();
     std::fs::write(&destination_path, licenses_json).unwrap();
 
-    println!("Generated licenses to {:?}", destination_path);
-    println!(
-        "License count: {}/{}",
+    green_log!(
+        "Finished",
+        "generated to {:?} in {}.{:03}s",
+        destination_path,
+        current.elapsed().as_secs(),
+        current.elapsed().subsec_millis()
+    );
+
+    green_log!(
+        "",
+        "license count: {}/{}",
         licenses
             .iter()
             .filter(|license| license.text.split('\n').count() > 2)
@@ -207,6 +254,8 @@ fn generate_licenses() {
 }
 
 fn generate_installer() {
+    let current = std::time::Instant::now();
+
     let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
@@ -227,13 +276,24 @@ fn generate_installer() {
         installer_base.replace("{version}", &version),
     )
     .unwrap();
-    println!("Generated installer to {:?}", installer_dist);
+    blue_log!("Building", "wrote nsis script to {:?}", installer_dist);
 
     duct::cmd!("makensis", &installer_dist, "/INPUTCHARSET", "UTF8")
         .dir(main_crate)
+        .before_spawn(|command| {
+            blue_log!("Running", "{:?}", command);
+
+            Ok(())
+        })
         .run()
         .unwrap();
-    println!("Generated installer",);
+    green_log!(
+        "Finished",
+        "to {:?} in {}.{:03}s",
+        installer_dist.with_extension("exe"),
+        current.elapsed().as_secs(),
+        current.elapsed().subsec_millis()
+    );
 }
 
 fn main() {
