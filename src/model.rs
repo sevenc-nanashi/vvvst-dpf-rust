@@ -26,11 +26,17 @@ pub enum RequestInner {
     GetProjectName,
 
     GetConfig,
+
     GetProject,
     SetProject(String),
+
     SetPhrases(Vec<Phrase>),
+
+    GetVoices,
     SetVoices(HashMap<SingingVoiceKey, String>),
+
     SetTracks(HashMap<TrackId, Track>),
+
     SetRouting(Routing),
     GetRouting,
 
@@ -46,7 +52,6 @@ pub struct SingingVoiceKey(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TrackId(pub String);
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

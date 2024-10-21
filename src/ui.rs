@@ -1,12 +1,13 @@
-use crate::{
-    common::{NUM_CHANNELS, RUNTIME},
-    model::*,
-    plugin::PluginImpl,
-};
+use crate::{common::RUNTIME, model::*, plugin::PluginImpl};
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, collections::HashSet, num::NonZeroIsize, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    num::NonZeroIsize,
+    sync::Arc,
+};
 use tokio::sync::{mpsc::UnboundedReceiver, Mutex};
 use tracing::{error, info, warn};
 
@@ -39,8 +40,13 @@ impl PluginUiImpl {
 
         let (notification_sender, notification_receiver) = tokio::sync::mpsc::unbounded_channel();
         {
-            let mut plugin = RUNTIME.block_on(plugin.lock());
+            let mut plugin = plugin.blocking_lock();
             plugin.notification_sender = Some(notification_sender);
+
+            if plugin.is_first_launch {
+                plugin.is_first_launch = false;
+                plugin.params.blocking_write().voices.clear();
+            }
         }
 
         let (response_sender, response_receiver) =
@@ -221,29 +227,30 @@ impl PluginUiImpl {
                 params.project = Some(project.clone());
                 Ok(serde_json::Value::Null)
             }
+            RequestInner::GetVoices => {
+                let voices = &params.read().await.voices;
+                let encoded_voices = voices
+                    .iter()
+                    .map(|(key, value)| (key.clone(), base64.encode(value)))
+                    .collect::<HashMap<_, _>>();
+
+                Ok(serde_json::to_value(encoded_voices)?)
+            }
             RequestInner::SetPhrases(phrases) => {
                 let mut params = params.write().await;
                 params.phrases = phrases.clone();
 
-                let samples = &mut params.voices;
+                let voices = &mut params.voices;
                 let missing_voices = phrases
                     .iter()
                     .filter_map(|phrase| {
-                        if samples.contains_key(&phrase.voice) {
+                        if voices.contains_key(&phrase.voice) {
                             None
                         } else {
                             Some(phrase.voice.clone())
                         }
                     })
                     .collect::<HashSet<_>>();
-                let unused_voices = samples
-                    .keys()
-                    .filter(|voice| !phrases.iter().any(|phrase| phrase.voice == **voice))
-                    .cloned()
-                    .collect::<HashSet<_>>();
-                for audio_hash in unused_voices {
-                    samples.remove(&audio_hash);
-                }
                 if missing_voices.is_empty() {
                     let plugin = Arc::clone(&plugin);
                     tokio::spawn(async move {
@@ -257,8 +264,8 @@ impl PluginUiImpl {
             RequestInner::SetVoices(voices) => {
                 {
                     let voices_ref = &mut params.write().await.voices;
-                    for (audio_hash, sample) in voices {
-                        voices_ref.insert(audio_hash, base64.decode(sample)?);
+                    for (audio_hash, voice) in voices {
+                        voices_ref.insert(audio_hash, base64.decode(voice)?);
                     }
                 }
 

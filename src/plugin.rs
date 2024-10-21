@@ -25,6 +25,8 @@ pub struct PluginImpl {
     pub params: Arc<RwLock<PluginParams>>,
     pub mix: Arc<RwLock<Mixes>>,
 
+    pub is_first_launch: bool,
+
     prev_position: usize,
     prev_position_updated: std::time::Instant,
     prev_is_playing: bool,
@@ -157,21 +159,30 @@ impl PluginImpl {
             params: Arc::new(RwLock::new(params)),
             mix: Arc::new(RwLock::new(Mixes::default())),
 
+            is_first_launch: true,
+
             prev_position: 0,
+            prev_position_updated: std::time::Instant::now(),
             prev_is_playing: false,
         }
     }
 
     #[instrument]
     pub async fn update_audio_samples(&self, new_sample_rate: Option<f32>) {
+        let mut mix = self.mix.write().await;
+        mix.samples.clear();
+
+        let new_sample_rate = new_sample_rate.unwrap_or(mix.sample_rate);
+        if new_sample_rate == 0.0 {
+            info!("sample rate is 0, refusing to update mixes");
+            return;
+        }
+
         let params = self.params.read().await;
         let phrases = &params.phrases;
         let voices = &params.voices;
-        let mut mix = self.mix.write().await;
-        mix.samples.clear();
-        info!("updating mixes using {} phrases", phrases.len());
 
-        let new_sample_rate = new_sample_rate.unwrap_or(mix.sample_rate);
+        info!("updating mixes using {} phrases", phrases.len());
 
         let max_start = phrases
             .iter()
@@ -233,11 +244,11 @@ impl PluginImpl {
     }
 
     // NOTE: DPFはバイナリ文字列を扱えないので、base64エンコードを挟む
-    pub async fn set_state(&self, state_base64: &str) -> Result<()> {
+    pub fn set_state(&self, state_base64: &str) -> Result<()> {
         if state_base64.is_empty() {
             return Ok(());
         }
-        let mut params = self.params.write().await;
+        let mut params = self.params.blocking_write();
         let state = base64.decode(state_base64)?;
         let loaded_params = bincode::deserialize(&state)?;
         *params = loaded_params;
@@ -245,8 +256,8 @@ impl PluginImpl {
         Ok(())
     }
 
-    pub async fn get_state(&self) -> String {
-        let params = self.params.read().await;
+    pub fn get_state(&self) -> String {
+        let params = self.params.blocking_read();
         base64.encode(&bincode::serialize(&*params).unwrap())
     }
 
@@ -264,10 +275,6 @@ impl PluginImpl {
         }
         if let Ok(mut this) = this_ref.try_lock() {
             if let (Ok(mix), Ok(params)) = (this.mix.try_read(), this.params.try_read()) {
-                let samples = &mix.samples;
-                if samples.is_empty() || mix.samples_len == 0 {
-                    return;
-                }
                 if mix.sample_rate != sample_rate {
                     let this_ref = Arc::clone(&this_ref);
                     RUNTIME.spawn(async move {
@@ -277,6 +284,10 @@ impl PluginImpl {
                             .update_audio_samples(Some(sample_rate))
                             .await;
                     });
+                    return;
+                }
+                let samples = &mix.samples;
+                if samples.is_empty() || mix.samples_len == 0 {
                     return;
                 }
                 if is_playing {

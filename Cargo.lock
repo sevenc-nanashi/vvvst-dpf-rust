@@ -4299,7 +4299,6 @@ dependencies = [
  "gtk",
  "include_dir",
  "mime_guess",
- "paste",
  "raw-window-handle",
  "rfd",
  "rstest",

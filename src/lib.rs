@@ -4,7 +4,6 @@ mod plugin;
 mod saturating_ext;
 mod ui;
 
-use crate::common::RUNTIME;
 use common::NUM_CHANNELS;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -74,15 +73,15 @@ unsafe extern "C-unwind" fn plugin_new() -> *mut Plugin {
 
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_set_state(plugin: &Plugin, state: *const std::ffi::c_char) {
-    let plugin = RUNTIME.block_on(plugin.inner.lock());
+    let plugin = plugin.inner.blocking_lock();
     let state = std::ffi::CStr::from_ptr(state).to_str().unwrap();
-    let _ = RUNTIME.block_on(plugin.set_state(state));
+    let _ = plugin.set_state(state);
 }
 
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_get_state(plugin: &Plugin) -> *mut std::os::raw::c_char {
-    let plugin = RUNTIME.block_on(plugin.inner.lock());
-    let state = RUNTIME.block_on(plugin.get_state());
+    let plugin = plugin.inner.blocking_lock();
+    let state = plugin.get_state();
     let state = std::ffi::CString::new(state).unwrap();
     state.into_raw()
 }
@@ -139,13 +138,13 @@ unsafe extern "C-unwind" fn plugin_ui_new(handle: usize, plugin: &Plugin) -> *mu
 
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_ui_get_native_window_handle(plugin_ui: &PluginUi) -> usize {
-    let plugin_ui = RUNTIME.block_on(plugin_ui.inner.lock());
+    let plugin_ui = plugin_ui.inner.blocking_lock();
     plugin_ui.get_native_window_handle()
 }
 
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_ui_set_size(plugin_ui: &PluginUi, width: usize, height: usize) {
-    let plugin_ui = RUNTIME.block_on(plugin_ui.inner.lock());
+    let plugin_ui = plugin_ui.inner.blocking_lock();
     if let Err(err) = plugin_ui.set_size(width, height) {
         error!("Failed to set size: {}", err);
     }
@@ -153,7 +152,7 @@ unsafe extern "C-unwind" fn plugin_ui_set_size(plugin_ui: &PluginUi, width: usiz
 
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_ui_idle(plugin_ui: &PluginUi) {
-    let mut plugin_ui = RUNTIME.block_on(plugin_ui.inner.lock());
+    let mut plugin_ui = plugin_ui.inner.blocking_lock();
     if let Err(err) = plugin_ui.idle() {
         error!("Idle callback failed: {}", err);
     }
