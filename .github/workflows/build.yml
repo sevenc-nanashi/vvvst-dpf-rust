@@ -182,4 +182,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.determine-information.outputs.ref_name }}
-          files: ./build/VVVST-*-setup.exe
+          files: ./build/VVVST-*-windows-setup.exe

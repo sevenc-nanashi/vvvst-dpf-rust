@@ -17,7 +17,7 @@
 ;-------------------------------------------------------------------------------
 ; Attributes
 Name "VVVST"
-OutFile "build/VVVST-{version}-setup.exe"
+OutFile "build/VVVST-{version}-windows-setup.exe"
 InstallDir "$PROGRAMFILES64\Common Files\VST3\VVVST.vst3"
 RequestExecutionLevel admin ; user|highest|admin
 
