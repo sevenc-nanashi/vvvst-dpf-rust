@@ -1,3 +1,5 @@
+#include <vector>
+
 #include "DistrhoUI.hpp"
 #include "plugin.hpp"
 #include "rust.generated.hpp"

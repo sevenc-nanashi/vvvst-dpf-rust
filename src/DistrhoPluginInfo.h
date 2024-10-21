@@ -1,8 +1,6 @@
 #ifndef DISTRHO_PLUGIN_INFO_H_INCLUDED
 #define DISTRHO_PLUGIN_INFO_H_INCLUDED
 
-// AUのビルドが落ちる問題へのワークアラウンド
-#include <vector>
 
 // #define DISTRHO_PLUGIN_BRAND "Nanashi."
 #define DISTRHO_PLUGIN_BRAND "Voicevox"
