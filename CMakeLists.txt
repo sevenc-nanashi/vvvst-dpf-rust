@@ -31,7 +31,7 @@ endif()
 
 dpf_add_plugin(
   ${VVVST_NAME}
-  TARGETS vst3
+  TARGETS vst3 au
   UI_TYPE external
   FILES_DSP src/plugin.cpp
   FILES_UI src/ui.cpp)
