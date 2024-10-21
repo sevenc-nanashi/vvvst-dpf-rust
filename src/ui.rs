@@ -52,6 +52,7 @@ impl PluginUiImpl {
         let temp_dir = tempfile::TempDir::new()?;
         let mut web_context = wry::WebContext::new(Some(temp_dir.path().to_path_buf()));
         let window_builder = wry::WebViewBuilder::new(&window_handle)
+            .with_clipboard(true)
             .with_background_color((165, 212, 173, 255))
             .with_web_context(&mut web_context)
             .with_custom_protocol("app".to_string(), |request| {

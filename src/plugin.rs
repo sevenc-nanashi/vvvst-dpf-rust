@@ -26,6 +26,7 @@ pub struct PluginImpl {
     pub mix: Arc<RwLock<Mixes>>,
 
     prev_position: usize,
+    prev_position_updated: std::time::Instant,
     prev_is_playing: bool,
 }
 impl std::fmt::Debug for PluginImpl {
@@ -231,7 +232,7 @@ impl PluginImpl {
         mix.samples_len = samples_len;
     }
 
-    // メモ：DPFはバイナリ文字列を扱えないので、base64エンコードを挟む
+    // NOTE: DPFはバイナリ文字列を扱えないので、base64エンコードを挟む
     pub async fn set_state(&self, state_base64: &str) -> Result<()> {
         if state_base64.is_empty() {
             return Ok(());
@@ -331,8 +332,13 @@ impl PluginImpl {
                 }
             }
 
-            if this.prev_position.abs_diff(current_sample) > (sample_rate * 0.1) as usize {
+            // 0.1秒ごとにUIに通知。run()の時間だとオフラインレンダリング時に大量の通知が送られるので
+            // 100ms以上経過していない場合は通知しない
+            if this.prev_position.abs_diff(current_sample) > (sample_rate * 0.1) as usize
+                && this.prev_position_updated.elapsed().as_millis() > 100
+            {
                 this.prev_position = current_sample;
+                this.prev_position_updated = std::time::Instant::now();
                 if let Some(sender) = &this.notification_sender {
                     if sender
                         .send(UiNotification::UpdatePosition(
