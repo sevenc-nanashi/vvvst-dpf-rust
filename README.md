@@ -67,3 +67,4 @@ sequenceDiagram
         vue->>rust: SingingVoice
         Note over rust: wavパース&再サンプル->ミックスダウン作成 @ 別スレッド
     end
+```
