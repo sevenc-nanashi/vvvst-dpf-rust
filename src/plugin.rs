@@ -25,7 +25,7 @@ pub struct PluginImpl {
     pub params: Arc<RwLock<PluginParams>>,
     pub mix: Arc<RwLock<Mixes>>,
 
-    pub is_first_launch: bool,
+    pub voice_caches: HashMap<SingingVoiceKey, Vec<u8>>,
 
     prev_position: usize,
     prev_position_updated: std::time::Instant,
@@ -159,7 +159,7 @@ impl PluginImpl {
             params: Arc::new(RwLock::new(params)),
             mix: Arc::new(RwLock::new(Mixes::default())),
 
-            is_first_launch: true,
+            voice_caches: HashMap::new(),
 
             prev_position: 0,
             prev_position_updated: std::time::Instant::now(),

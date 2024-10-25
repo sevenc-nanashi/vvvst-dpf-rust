@@ -42,11 +42,6 @@ impl PluginUiImpl {
         {
             let mut plugin = plugin.blocking_lock();
             plugin.notification_sender = Some(notification_sender);
-
-            if plugin.is_first_launch {
-                plugin.is_first_launch = false;
-                plugin.params.blocking_write().voices.clear();
-            }
         }
 
         let (response_sender, response_receiver) =
@@ -228,8 +223,9 @@ impl PluginUiImpl {
                 Ok(serde_json::Value::Null)
             }
             RequestInner::GetVoices => {
-                let voices = &params.read().await.voices;
-                let encoded_voices = voices
+                let plugin = plugin.lock().await;
+                let encoded_voices = plugin
+                    .voice_caches
                     .iter()
                     .map(|(key, value)| (key.clone(), base64.encode(value)))
                     .collect::<HashMap<_, _>>();
@@ -257,15 +253,23 @@ impl PluginUiImpl {
                         plugin.lock().await.update_audio_samples(None).await;
                     });
                 }
+                let used_voices = phrases
+                    .iter()
+                    .map(|phrase| phrase.voice.clone())
+                    .collect::<HashSet<_>>();
+                voices.retain(|key, _| used_voices.contains(key));
                 Ok(serde_json::to_value(SetPhraseResult {
                     missing_voices: missing_voices.into_iter().collect(),
                 })?)
             }
             RequestInner::SetVoices(voices) => {
                 {
+                    let mut plugin = plugin.lock().await;
                     let voices_ref = &mut params.write().await.voices;
                     for (audio_hash, voice) in voices {
-                        voices_ref.insert(audio_hash, base64.decode(voice)?);
+                        let decoded = base64.decode(voice)?;
+                        voices_ref.insert(audio_hash.clone(), decoded.clone());
+                        plugin.voice_caches.insert(audio_hash, decoded);
                     }
                 }
 
