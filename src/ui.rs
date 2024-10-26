@@ -133,9 +133,9 @@ impl PluginUiImpl {
 
         #[cfg(target_os = "linux")]
         {
-            gtk::init().unwrap();
+            gtk::init()?;
         }
-        let window = window_builder.build().unwrap();
+        let window = window_builder.build()?;
         let window = Arc::new(window);
 
         Ok(PluginUiImpl {

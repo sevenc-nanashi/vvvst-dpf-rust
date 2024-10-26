@@ -14,9 +14,17 @@ public:
     auto plugin = static_cast<VvvstPlugin *>(this->getPluginInstancePointer());
     inner = Rust::plugin_ui_new(this->getParentWindowHandle(), plugin->inner);
   }
-  ~VvvstUi() override { Rust::plugin_ui_drop(inner); };
+  ~VvvstUi() override {
+    if (!inner) {
+      return;
+    }
+    Rust::plugin_ui_drop(inner);
+  };
 
   std::uintptr_t getNativeWindowHandle() const noexcept override {
+    if (!inner) {
+      return 0;
+    }
     return Rust::plugin_ui_get_native_window_handle(inner);
   };
 
@@ -27,11 +35,19 @@ public:
     onSizeChanged(width, height);
   }
 
-  void uiIdle() override { Rust::plugin_ui_idle(inner); }
+  void uiIdle() override {
+    if (!inner) {
+      return;
+    }
+    Rust::plugin_ui_idle(inner);
+  }
 
   void stateChanged(const char *key, const char *value) override {}
 
   void onSizeChanged(uint width, uint height) {
+    if (!inner) {
+      return;
+    }
     Rust::plugin_ui_set_size(inner, width, height);
   }
 
