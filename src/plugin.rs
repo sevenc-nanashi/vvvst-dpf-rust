@@ -249,7 +249,8 @@ impl PluginImpl {
             return Ok(());
         }
         let mut params = self.params.blocking_write();
-        let state = base64.decode(state_base64)?;
+        let state_compressed = base64.decode(state_base64)?;
+        let state = zstd::decode_all(state_compressed.as_slice())?;
         let loaded_params = bincode::deserialize(&state)?;
         *params = loaded_params;
 
@@ -258,7 +259,9 @@ impl PluginImpl {
 
     pub fn get_state(&self) -> String {
         let params = self.params.blocking_read();
-        base64.encode(&bincode::serialize(&*params).unwrap())
+        let state = bincode::serialize(&*params).unwrap();
+        let state_compressed = zstd::encode_all(state.as_slice(), 22).unwrap();
+        base64.encode(state_compressed.as_slice())
     }
 
     pub fn run(
