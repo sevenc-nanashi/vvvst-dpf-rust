@@ -33,7 +33,7 @@ impl PluginUiImpl {
     pub unsafe fn new(handle: usize, plugin: Arc<Mutex<PluginImpl>>) -> Result<Self> {
         let raw_window_handle =
             raw_window_handle::RawWindowHandle::Win32(raw_window_handle::Win32WindowHandle::new(
-                NonZeroIsize::new(usize_to_isize(handle))
+                NonZeroIsize::new(handle as isize)
                     .ok_or_else(|| anyhow::anyhow!("handle is zero"))?,
             ));
         let window_handle = raw_window_handle::WindowHandle::borrow_raw(raw_window_handle);
@@ -351,20 +351,5 @@ impl PluginUiImpl {
         let response = serde_json::to_string(response).unwrap();
 
         format!(r#"window.onIpcResponse({})"#, response)
-    }
-}
-
-pub fn usize_to_isize(value: usize) -> isize {
-    if value > isize::MAX as usize {
-        (value - isize::MAX as usize - 1) as isize
-    } else {
-        value as isize
-    }
-}
-pub fn isize_to_usize(value: isize) -> usize {
-    if value < 0 {
-        (value + isize::MAX + 1) as usize
-    } else {
-        value as usize
     }
 }
