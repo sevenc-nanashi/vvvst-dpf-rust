@@ -16,7 +16,7 @@ Issue：<https://github.com/VOICEVOX/voicevox_project/issues/45>
 ### VST プラグイン本体
 
 ```bash
-❯ cargo xtask build -h
+❯ cargo xtask build --help
 Usage: xtask.exe build [OPTIONS]
 
 Options:
@@ -30,15 +30,42 @@ Options:
 ### Windows用インストーラー
 
 依存：
+
 - [NSIS](https://nsis.sourceforge.io/Main_Page)（3.09 で動作確認）
 
 ```bash
-❯ cargo xtask generate-installer -h
-Usage: xtask.exe generate-installer  
+❯ cargo xtask generate-installer --help
+Usage: xtask.exe generate-installer
 
 Options:
   -h, --help     Print help
-  -V, --version  Print version       
+  -V, --version  Print version
+```
+
+### `.hpp` ファイル
+
+```bash
+❯ cargo xtask generate-header --help
+Usage: xtask.exe generate-header
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+### ライセンス情報
+
+```bash
+❯ cargo xtask generate-licenses --help
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.23s
+     Running `target\debug\xtask.exe generate-licenses --help`
+licenses.jsonを生成する。
+
+Usage: xtask.exe generate-licenses
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 ```
 
 ## 仕組み

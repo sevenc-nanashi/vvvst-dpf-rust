@@ -144,7 +144,7 @@ fn build(args: BuildArgs) {
     let elapsed = current.elapsed();
     green_log!(
         "Finished",
-        "in {}.{:03}s",
+        "built in {}.{:03}s",
         elapsed.as_secs(),
         elapsed.subsec_millis()
     );
@@ -289,7 +289,7 @@ fn generate_installer() {
         .unwrap();
     green_log!(
         "Finished",
-        "to {:?} in {}.{:03}s",
+        "built to {:?} in {}.{:03}s",
         installer_dist.with_extension("exe"),
         current.elapsed().as_secs(),
         current.elapsed().subsec_millis()
