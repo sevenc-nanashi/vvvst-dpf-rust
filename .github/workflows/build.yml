@@ -94,6 +94,9 @@ jobs:
             name: "linux"
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Colorize
+        run: |
+          echo "CLICOLOR_FORCE=1" >> $GITHUB_ENV
       - name: Checkout VVVST
         uses: actions/checkout@v4
         with:
