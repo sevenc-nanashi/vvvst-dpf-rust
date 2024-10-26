@@ -168,7 +168,7 @@ impl PluginUiImpl {
 
     pub fn get_native_window_handle(&self) -> usize {
         match self.raw_window_handle {
-            raw_window_handle::RawWindowHandle::Win32(handle) => isize_to_usize(handle.hwnd.get()),
+            raw_window_handle::RawWindowHandle::Win32(handle) => handle.hwnd.get() as usize,
             _ => 0,
         }
     }
