@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
-    num::NonZeroIsize,
+    ffi::c_void,
+    num::NonZero,
+    ptr::NonNull,
     sync::Arc,
 };
 use tokio::sync::{mpsc::UnboundedReceiver, Mutex};
@@ -13,7 +15,6 @@ use tracing::{error, info, warn};
 
 static EDITOR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/resources/editor");
 pub struct PluginUiImpl {
-    raw_window_handle: raw_window_handle::RawWindowHandle,
     window: Arc<wry::WebView>,
 
     _data_dir: tempfile::TempDir,
@@ -31,11 +32,23 @@ pub enum UiNotification {
 
 impl PluginUiImpl {
     pub unsafe fn new(handle: usize, plugin: Arc<Mutex<PluginImpl>>) -> Result<Self> {
-        let raw_window_handle =
+        let raw_window_handle = if cfg!(target_os = "windows") {
             raw_window_handle::RawWindowHandle::Win32(raw_window_handle::Win32WindowHandle::new(
-                NonZeroIsize::new(handle as isize)
-                    .ok_or_else(|| anyhow::anyhow!("handle is zero"))?,
-            ));
+                NonZero::new(handle as isize).ok_or_else(|| anyhow::anyhow!("handle is zero"))?,
+            ))
+        } else if cfg!(target_os = "macos") {
+            raw_window_handle::RawWindowHandle::AppKit(raw_window_handle::AppKitWindowHandle::new(
+                NonNull::new(handle as *mut c_void)
+                    .ok_or_else(|| anyhow::anyhow!("handle is zero"))?
+                    .cast(),
+            ))
+        } else if cfg!(target_os = "linux") {
+            raw_window_handle::RawWindowHandle::Xcb(raw_window_handle::XcbWindowHandle::new(
+                NonZero::new(handle as u32).ok_or_else(|| anyhow::anyhow!("handle is zero"))?,
+            ))
+        } else {
+            unreachable!()
+        };
         let window_handle = raw_window_handle::WindowHandle::borrow_raw(raw_window_handle);
 
         let (notification_sender, notification_receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -139,7 +152,6 @@ impl PluginUiImpl {
         let window = Arc::new(window);
 
         Ok(PluginUiImpl {
-            raw_window_handle,
             window,
 
             _data_dir: temp_dir,
@@ -164,13 +176,6 @@ impl PluginUiImpl {
         }
 
         Ok(())
-    }
-
-    pub fn get_native_window_handle(&self) -> usize {
-        match self.raw_window_handle {
-            raw_window_handle::RawWindowHandle::Win32(handle) => handle.hwnd.get() as usize,
-            _ => 0,
-        }
     }
 
     pub fn set_size(&self, width: usize, height: usize) -> Result<()> {

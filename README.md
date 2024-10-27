@@ -57,10 +57,6 @@ Options:
 
 ```bash
 ❯ cargo xtask generate-licenses --help
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.23s
-     Running `target\debug\xtask.exe generate-licenses --help`
-licenses.jsonを生成する。
-
 Usage: xtask.exe generate-licenses
 
 Options:

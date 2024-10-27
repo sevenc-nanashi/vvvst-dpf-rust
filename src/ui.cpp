@@ -21,13 +21,6 @@ public:
     Rust::plugin_ui_drop(inner);
   };
 
-  std::uintptr_t getNativeWindowHandle() const noexcept override {
-    if (!inner) {
-      return 0;
-    }
-    return Rust::plugin_ui_get_native_window_handle(inner);
-  };
-
   void parameterChanged(uint32_t index, float value) override {}
 
   void sizeChanged(uint width, uint height) override {

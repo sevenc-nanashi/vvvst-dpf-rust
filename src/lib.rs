@@ -137,12 +137,6 @@ unsafe extern "C-unwind" fn plugin_ui_new(handle: usize, plugin: &Plugin) -> *mu
 }
 
 #[no_mangle]
-unsafe extern "C-unwind" fn plugin_ui_get_native_window_handle(plugin_ui: &PluginUi) -> usize {
-    let plugin_ui = plugin_ui.inner.blocking_lock();
-    plugin_ui.get_native_window_handle()
-}
-
-#[no_mangle]
 unsafe extern "C-unwind" fn plugin_ui_set_size(plugin_ui: &PluginUi, width: usize, height: usize) {
     let plugin_ui = plugin_ui.inner.blocking_lock();
     if let Err(err) = plugin_ui.set_size(width, height) {
