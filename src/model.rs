@@ -45,6 +45,8 @@ pub enum RequestInner {
     ReadFile(String),
 
     ExportProject,
+
+    GetCurrentPosition,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

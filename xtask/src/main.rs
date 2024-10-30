@@ -30,15 +30,22 @@ enum SubCommands {
     /// C++のヘッダーファイルを生成する。
     #[command(version, about, long_about = None)]
     GenerateHeader,
+
     /// プラグインをビルドする。
     #[command(version, about, long_about = None)]
     Build(BuildArgs),
+
     /// licenses.jsonを生成する。
     #[command(version, about, long_about = None)]
     GenerateLicenses,
+
     /// Windows用のインストーラーを生成する。
     #[command(version, about, long_about = None)]
     GenerateInstaller,
+
+    /// ログを確認する。
+    #[command(version, about, long_about = None)]
+    TailLog,
 }
 
 #[derive(Parser, Debug)]
@@ -48,7 +55,7 @@ struct BuildArgs {
     release: bool,
     /// logs内にVST内のログを出力するかどうか。
     #[clap(short, long)]
-    log: bool,
+    log: Option<bool>,
     /// 開発用サーバーのURL。デフォルトはhttp://localhost:5173。
     #[clap(short, long)]
     dev_server_url: Option<String>,
@@ -68,6 +75,8 @@ fn build(args: BuildArgs) {
     let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
+
+    let enable_log = args.log.unwrap_or(!args.release);
     if args.release {
         let editor_path = main_crate
             .join("resources")
@@ -77,7 +86,7 @@ fn build(args: BuildArgs) {
             panic!("Editor resources not found at {:?}", editor_path);
         }
 
-        if args.log {
+        if enable_log {
             panic!("Cannot enable logging in release mode");
         }
         if args.dev_server_url.is_some() {
@@ -85,7 +94,7 @@ fn build(args: BuildArgs) {
         }
     }
     let mut envs = std::env::vars().collect::<std::collections::HashMap<_, _>>();
-    if args.log {
+    if enable_log {
         envs.insert("VVVST_LOG".to_string(), "1".to_string());
     }
     if let Some(ref dev_server_url) = args.dev_server_url {
@@ -100,7 +109,7 @@ fn build(args: BuildArgs) {
     green_log!(
         "Building",
         "log: {}, dev_server_url: {:?}, release: {}",
-        args.log,
+        enable_log,
         args.dev_server_url,
         args.release
     );
@@ -154,7 +163,7 @@ fn build(args: BuildArgs) {
     );
     green_log!("", "destination: {:?}", &destination_path);
     green_log!("", "plugin: {:?}", destination_path.join("bin"),);
-    if args.log {
+    if enable_log {
         green_log!("", "logs: {:?}", main_crate.join("logs"));
     }
 }
@@ -300,6 +309,31 @@ fn generate_installer() {
     );
 }
 
+fn tail_log() {
+    let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let logs = main_crate.join("logs");
+    if !logs.exists() {
+        panic!("Logs not found at {:?}", logs);
+    }
+
+    let logs = std::fs::read_dir(&logs)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    let last_log = logs.last().unwrap();
+
+    duct::cmd!("tail", "-f", &last_log)
+        .before_spawn(|command| {
+            blue_log!("Running", "{:?}", command);
+
+            Ok(())
+        })
+        .run()
+        .unwrap();
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -315,6 +349,9 @@ fn main() {
         }
         SubCommands::GenerateInstaller => {
             generate_installer();
+        }
+        SubCommands::TailLog => {
+            tail_log();
         }
     }
 }

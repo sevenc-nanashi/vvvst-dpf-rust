@@ -28,8 +28,10 @@ pub struct PluginImpl {
     pub voice_caches: HashMap<SingingVoiceKey, Vec<u8>>,
 
     prev_position: usize,
-    prev_position_updated: std::time::Instant,
     prev_is_playing: bool,
+
+    pub current_position: f32,
+    pub current_position_updated: bool,
 }
 impl std::fmt::Debug for PluginImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -162,8 +164,10 @@ impl PluginImpl {
             voice_caches: HashMap::new(),
 
             prev_position: 0,
-            prev_position_updated: std::time::Instant::now(),
             prev_is_playing: false,
+
+            current_position: 0.0,
+            current_position_updated: false,
         }
     }
 
@@ -346,23 +350,10 @@ impl PluginImpl {
                 }
             }
 
-            // 0.1秒ごとにUIに通知。run()の時間だとオフラインレンダリング時に大量の通知が送られるので
-            // 100ms以上経過していない場合は通知しない
-            if this.prev_position.abs_diff(current_sample) > (sample_rate * 0.1) as usize
-                && this.prev_position_updated.elapsed().as_millis() > 100
-            {
+            if this.prev_position != current_sample {
                 this.prev_position = current_sample;
-                this.prev_position_updated = std::time::Instant::now();
-                if let Some(sender) = &this.notification_sender {
-                    if sender
-                        .send(UiNotification::UpdatePosition(
-                            (current_sample as f32) / sample_rate,
-                        ))
-                        .is_err()
-                    {
-                        this.notification_sender = None;
-                    }
-                }
+                this.current_position = current_sample as f32 / sample_rate;
+                this.current_position_updated = true;
             }
             if this.prev_is_playing != is_playing {
                 this.prev_is_playing = is_playing;

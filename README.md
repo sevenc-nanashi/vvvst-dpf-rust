@@ -64,6 +64,20 @@ Options:
   -V, --version  Print version
 ```
 
+## ツール
+
+### テスト
+
+```bash
+❯ cargo test
+```
+
+### ログの確認
+
+```bash
+❯ cargo xtask tail-log
+```
+
 ## 仕組み
 
 ```mermaid

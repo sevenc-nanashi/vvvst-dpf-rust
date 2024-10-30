@@ -27,7 +27,6 @@ pub struct PluginUiImpl {
 #[serde(rename_all = "camelCase", tag = "type", content = "payload")]
 pub enum UiNotification {
     UpdatePlayingState(bool),
-    UpdatePosition(f32),
 }
 
 impl PluginUiImpl {
@@ -162,11 +161,14 @@ impl PluginUiImpl {
 
     pub fn idle(&mut self) -> Result<()> {
         while let Ok(message) = self.response_receiver.try_recv() {
-            let js = PluginUiImpl::response_to_js(&message);
-            self.webview.evaluate_script(&js)?;
+            let response = serde_json::to_string(&message).unwrap();
+
+            self.webview
+                .evaluate_script(&format!(r#"window.onIpcResponse({})"#, response))?;
         }
 
         if let Ok(notification) = self.notification_receiver.try_recv() {
+            info!("rust->js notification: {:?}", notification);
             let js = format!(
                 r#"window.onIpcNotification({})"#,
                 serde_json::to_string(&notification).unwrap()
@@ -190,7 +192,10 @@ impl PluginUiImpl {
         plugin: Arc<Mutex<PluginImpl>>,
         request: RequestInner,
     ) -> Result<serde_json::Value> {
-        let params = Arc::clone(&plugin.lock().await.params);
+        let params = {
+            let plugin = plugin.lock().await;
+            Arc::clone(&plugin.params)
+        };
         match request {
             RequestInner::GetVersion => Ok(serde_json::to_value(env!("CARGO_PKG_VERSION"))?),
             RequestInner::GetProjectName => Ok(serde_json::to_value("VVVST")?),
@@ -348,12 +353,16 @@ impl PluginUiImpl {
                 params.routing.channel_index = new_channel_index;
                 Ok(serde_json::Value::Null)
             }
+
+            RequestInner::GetCurrentPosition => {
+                let mut plugin = plugin.lock().await;
+                if plugin.current_position_updated {
+                    plugin.current_position_updated = false;
+                    Ok(serde_json::to_value(plugin.current_position)?)
+                } else {
+                    Ok(serde_json::Value::Null)
+                }
+            }
         }
-    }
-
-    fn response_to_js(response: &Response) -> String {
-        let response = serde_json::to_string(response).unwrap();
-
-        format!(r#"window.onIpcResponse({})"#, response)
     }
 }
