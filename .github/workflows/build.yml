@@ -16,6 +16,8 @@ defaults:
 jobs:
   build-editor:
     runs-on: ubuntu-latest
+    outputs:
+      editor_sha: ${{ steps.emit-information.outputs.editor_sha }}
     steps:
       - name: Checkout Voicevox
         uses: actions/checkout@v4
@@ -78,6 +80,13 @@ jobs:
         with:
           name: build-editor
           path: dist/
+
+      - name: Emit information
+        id: emit-information
+        run: |
+          EDITOR_SHA=$(git rev-parse HEAD)
+          echo "editor_sha=$EDITOR_SHA" >> $GITHUB_OUTPUT
+
   build-each:
     needs:
       - build-editor
@@ -168,7 +177,9 @@ jobs:
       - name: Upload
         uses: softprops/action-gh-release@v2
         with:
-          body: "SHA: ${{ github.sha }}"
+          body: |
+            Rust SHA: ${{ github.sha }}
+            Editor SHA: ${{ needs.build-editor.outputs.editor_sha }}
           prerelease: ${{ steps.determine-information.outputs.prerelease }}
           files: |
             ${{ steps.determine-information.outputs.zip_name }}
