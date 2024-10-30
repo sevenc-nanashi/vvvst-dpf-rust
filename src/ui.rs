@@ -15,7 +15,7 @@ use tracing::{error, info, warn};
 
 static EDITOR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/resources/editor");
 pub struct PluginUiImpl {
-    window: Arc<wry::WebView>,
+    webview: Arc<wry::WebView>,
 
     _data_dir: tempfile::TempDir,
 
@@ -65,11 +65,10 @@ impl PluginUiImpl {
 
         let temp_dir = tempfile::TempDir::new()?;
         let mut web_context = wry::WebContext::new(Some(temp_dir.path().to_path_buf()));
-        let window_builder = wry::WebViewBuilder::new(&window_handle)
+        let webview_builder = wry::WebViewBuilder::with_web_context(&mut web_context)
             .with_clipboard(true)
             .with_background_color((165, 212, 173, 255))
-            .with_web_context(&mut web_context)
-            .with_custom_protocol("app".to_string(), |request| {
+            .with_custom_protocol("app".to_string(), |_id, request| {
                 let path = request.uri().path();
                 EDITOR
                     .get_file(path.trim_start_matches('/'))
@@ -148,11 +147,11 @@ impl PluginUiImpl {
         {
             gtk::init()?;
         }
-        let window = window_builder.build()?;
-        let window = Arc::new(window);
+        let webview = webview_builder.build_as_child(&window_handle)?;
+        let webview = Arc::new(webview);
 
         Ok(PluginUiImpl {
-            window,
+            webview,
 
             _data_dir: temp_dir,
 
@@ -164,7 +163,7 @@ impl PluginUiImpl {
     pub fn idle(&mut self) -> Result<()> {
         while let Ok(message) = self.response_receiver.try_recv() {
             let js = PluginUiImpl::response_to_js(&message);
-            self.window.evaluate_script(&js)?;
+            self.webview.evaluate_script(&js)?;
         }
 
         if let Ok(notification) = self.notification_receiver.try_recv() {
@@ -172,14 +171,14 @@ impl PluginUiImpl {
                 r#"window.onIpcNotification({})"#,
                 serde_json::to_string(&notification).unwrap()
             );
-            self.window.evaluate_script(&js)?;
+            self.webview.evaluate_script(&js)?;
         }
 
         Ok(())
     }
 
     pub fn set_size(&self, width: usize, height: usize) -> Result<()> {
-        self.window.set_bounds(wry::Rect {
+        self.webview.set_bounds(wry::Rect {
             position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
             size: winit::dpi::LogicalSize::new(width as f64, height as f64).into(),
         })?;

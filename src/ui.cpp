@@ -13,6 +13,8 @@ public:
   VvvstUi() : UI() {
     auto plugin = static_cast<VvvstPlugin *>(this->getPluginInstancePointer());
     inner = Rust::plugin_ui_new(this->getParentWindowHandle(), plugin->inner);
+
+    sizeChanged(this->getWidth(), this->getHeight());
   }
   ~VvvstUi() override {
     if (!inner) {

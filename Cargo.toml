@@ -34,7 +34,7 @@ tracing = { version = "0.1.40", features = ["log"] }
 tracing-subscriber = "0.3.18"
 wav_io = "0.1.14"
 winit = "0.30.5"
-wry = "0.45.0"
+wry = "0.46.3"
 zstd = "0.13.2"
 
 [lib]

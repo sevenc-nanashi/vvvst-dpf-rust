@@ -92,6 +92,10 @@ fn build(args: BuildArgs) {
         envs.insert("VVVST_DEV_SERVER_URL".to_string(), dev_server_url.clone());
     }
 
+    if colored::control::SHOULD_COLORIZE.should_colorize() {
+        envs.insert("CLICOLOR_FORCE".to_string(), "1".to_string());
+    }
+
     let build_name = if args.release { "release" } else { "debug" };
     green_log!(
         "Building",
