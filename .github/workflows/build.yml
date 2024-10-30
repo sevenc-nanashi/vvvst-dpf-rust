@@ -179,7 +179,7 @@ jobs:
         with:
           body: |
             Rust SHA: ${{ github.sha }}
-            Editor SHA: ${{ needs.build-editor.outputs.editor_sha }}
+            Editor SHA: https://github.com/sevenc-nanashi/voicevox/commit/${{ needs.build-editor.outputs.editor_sha }}
           prerelease: ${{ steps.determine-information.outputs.prerelease }}
           files: |
             ${{ steps.determine-information.outputs.zip_name }}
