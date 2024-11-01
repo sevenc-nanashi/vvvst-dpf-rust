@@ -2,15 +2,15 @@
 #include "DistrhoPlugin.hpp"
 #include "extra/String.hpp"
 #include "rust.generated.hpp"
+#include <memory>
 
 START_NAMESPACE_DISTRHO
 
 class VvvstPlugin : public Plugin {
 public:
   VvvstPlugin();
-  ~VvvstPlugin() override;
 
-  Rust::Plugin *inner;
+  std::shared_ptr<Rust::Plugin> inner;
 
 protected:
   /* --------------------------------------------------------------------------------------------------------

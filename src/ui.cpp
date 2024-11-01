@@ -1,6 +1,7 @@
 #include "DistrhoUI.hpp"
 #include "plugin.hpp"
 #include "rust.generated.hpp"
+#include <memory>
 #include <mutex>
 
 START_NAMESPACE_DISTRHO
@@ -10,14 +11,6 @@ START_NAMESPACE_DISTRHO
 class VvvstUi : public UI {
 public:
   VvvstUi() : UI() { initializeRustUi(); }
-  ~VvvstUi() override {
-    if (!inner) {
-      return;
-    }
-    auto _lock = std::unique_lock(this->mutex);
-    Rust::plugin_ui_drop(inner);
-  };
-
   void parameterChanged(uint32_t index, float value) override {}
 
   void sizeChanged(uint width, uint height) override {
@@ -27,18 +20,19 @@ public:
   }
 
   void uiIdle() override {
-    auto lock = std::unique_lock(this->mutex, std::defer_lock);
-    if (lock.try_lock()) {
-      if (!inner) {
-        if (uiRetried) {
-          return;
-        }
-
-        // Cubaseだとコンストラクト直後にRust側を初期化すると失敗することがあるので、1回だけリトライする
-        initializeRustUi();
+    if (!inner) {
+      if (uiRetried) {
         return;
       }
-      Rust::plugin_ui_idle(inner);
+
+      // Cubaseだとコンストラクト直後にRust側を初期化すると失敗することがあるので、1回だけリトライする
+      initializeRustUi();
+      uiRetried = true;
+      return;
+    }
+    auto lock = std::unique_lock(this->mutex, std::defer_lock);
+    if (lock.try_lock()) {
+      Rust::plugin_ui_idle(inner.get());
     }
   }
 
@@ -48,21 +42,27 @@ public:
     if (!inner) {
       return;
     }
-    Rust::plugin_ui_set_size(inner, width, height);
+    Rust::plugin_ui_set_size(inner.get(), width, height);
   }
 
 private:
   std::mutex mutex;
-  Rust::PluginUi *inner;
+  std::shared_ptr<Rust::PluginUi> inner;
   bool uiRetried = false;
 
   void initializeRustUi() {
+    auto lock = std::unique_lock(this->mutex);
+    if (inner) {
+      return;
+    }
     auto plugin = static_cast<VvvstPlugin *>(this->getPluginInstancePointer());
-    inner = Rust::plugin_ui_new(this->getParentWindowHandle(), plugin->inner);
+    inner = std::shared_ptr<Rust::PluginUi>(
+        Rust::plugin_ui_new(this->getParentWindowHandle(), plugin->inner.get()),
+        [](Rust::PluginUi *inner) { Rust::plugin_ui_drop(inner); });
     if (!inner) {
       return;
     }
-    Rust::plugin_ui_set_size(inner, this->getWidth(), this->getHeight());
+    Rust::plugin_ui_set_size(inner.get(), this->getWidth(), this->getHeight());
   }
 
   /**

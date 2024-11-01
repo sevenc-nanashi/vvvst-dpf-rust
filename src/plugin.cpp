@@ -6,8 +6,10 @@
 #include <string>
 // -----------------------------------------------------------------------------------------------------------
 
-VvvstPlugin::VvvstPlugin() : Plugin(0, 0, 1) { inner = Rust::plugin_new(); }
-VvvstPlugin::~VvvstPlugin() { Rust::plugin_drop(inner); }
+VvvstPlugin::VvvstPlugin() : Plugin(0, 0, 1) {
+  inner = std::shared_ptr<Rust::Plugin>(
+      Rust::plugin_new(), [](Rust::Plugin *p) { Rust::plugin_drop(p); });
+}
 
 /**
    Get the plugin label.
@@ -80,10 +82,10 @@ void VvvstPlugin::initState(uint32_t index, State &state) {
   state.hints = kStateIsBase64Blob;
 }
 void VvvstPlugin::setState(const char *key, const char *value) {
-  Rust::plugin_set_state(inner, value);
+  Rust::plugin_set_state(inner.get(), value);
 }
 String VvvstPlugin::getState(const char *key) const {
-  auto stateStringPtr = Rust::plugin_get_state(inner);
+  auto stateStringPtr = Rust::plugin_get_state(inner.get());
   auto stateStdString = std::string(stateStringPtr);
   Rust::cstring_drop(stateStringPtr);
 
@@ -104,7 +106,7 @@ void VvvstPlugin::run(const float **inputs, float **outputs, uint32_t frames,
   // int64_tに変換しておく
   int64_t samplePosition = timePosition.frame;
   auto isPlaying = timePosition.playing;
-  Rust::plugin_run(inner, outputs, sampleRate, frames, isPlaying,
+  Rust::plugin_run(inner.get(), outputs, sampleRate, frames, isPlaying,
                    samplePosition);
 }
 
