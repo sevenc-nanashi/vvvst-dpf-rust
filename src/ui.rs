@@ -180,6 +180,10 @@ impl PluginUiImpl {
     }
 
     pub fn set_size(&self, width: usize, height: usize) -> Result<()> {
+        // NOTE: HiDPI環境で表示エリアがおかしくなる
+        // PhysicalSizeを使うことでいったんの対応は可能そうですが
+        // ウインドウまたはディスプレイからscale_factorを取得して
+        // その比率を元にwidth, heightを変換するのがよいかも？
         self.webview.set_bounds(wry::Rect {
             position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
             size: winit::dpi::LogicalSize::new(width as f64, height as f64).into(),

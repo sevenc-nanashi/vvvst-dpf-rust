@@ -32,4 +32,8 @@ _deps
 
 /resources/editor/*
 !/resources/editor/.gitkeep
+/resources/dist
 installer.nsi
+
+## macOS
+.DS_Store
