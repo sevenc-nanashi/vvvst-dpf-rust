@@ -7,7 +7,7 @@ mod ui;
 use common::NUM_CHANNELS;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::error;
+use tracing::{info, error};
 
 pub struct Plugin {
     inner: Arc<Mutex<plugin::PluginImpl>>,
@@ -124,7 +124,10 @@ unsafe extern "C-unwind" fn plugin_drop(plugin: *mut Plugin) {
 unsafe extern "C-unwind" fn plugin_ui_new(handle: usize, plugin: &Plugin) -> *mut PluginUi {
     let plugin_ref = Arc::clone(&plugin.inner);
     let plugin_ui = match ui::PluginUiImpl::new(handle, plugin_ref) {
-        Ok(plugin_ui) => plugin_ui,
+        Ok(plugin_ui) => {
+            info!("PluginUi created");
+            plugin_ui
+        }
         Err(e) => {
             error!("Failed to create PluginUi: {}", e);
             return std::ptr::null_mut();

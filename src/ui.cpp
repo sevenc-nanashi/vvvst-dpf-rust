@@ -7,14 +7,9 @@ START_NAMESPACE_DISTRHO
 // -----------------------------------------------------------------------------------------------------------
 
 class VvvstUi : public UI {
-
-private:
 public:
   VvvstUi() : UI() {
-    auto plugin = static_cast<VvvstPlugin *>(this->getPluginInstancePointer());
-    inner = Rust::plugin_ui_new(this->getParentWindowHandle(), plugin->inner);
-
-    sizeChanged(this->getWidth(), this->getHeight());
+    initializeRustUi();
   }
   ~VvvstUi() override {
     if (!inner) {
@@ -32,6 +27,12 @@ public:
 
   void uiIdle() override {
     if (!inner) {
+      if (uiRetried) {
+        return;
+      }
+
+      // Cubaseだとコンストラクト直後にRust側を初期化すると失敗することがあるので、1回だけリトライする
+      initializeRustUi();
       return;
     }
     Rust::plugin_ui_idle(inner);
@@ -48,6 +49,17 @@ public:
 
 private:
   Rust::PluginUi *inner;
+  bool uiRetried = false;
+
+  void initializeRustUi() {
+    auto plugin = static_cast<VvvstPlugin *>(this->getPluginInstancePointer());
+    inner = Rust::plugin_ui_new(this->getParentWindowHandle(), plugin->inner);
+    if (!inner) {
+      return;
+    }
+    sizeChanged(this->getWidth(), this->getHeight());
+  }
+
   /**
      Set our UI class as non-copyable and add a leak detector just in case.
    */
