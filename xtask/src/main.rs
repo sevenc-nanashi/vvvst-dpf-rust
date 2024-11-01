@@ -331,10 +331,11 @@ fn watch_log() {
         .watch(&logs, notify::RecursiveMode::Recursive)
         .unwrap();
     let mut current_log = find_log(&logs);
-    let mut current_line = 0;
+    let mut current_log_process: Option<duct::Handle> = None;
 
     if let Some(ref current_log) = current_log {
         green_log!("Watching", "current log: {:?}", current_log);
+        current_log_process = Some(duct::cmd!("tail", "-f", current_log).start().unwrap());
     } else {
         green_log!("Watching", "no log found");
     }
@@ -345,13 +346,17 @@ fn watch_log() {
             notify::EventKind::Create(_) | notify::EventKind::Remove(_) => {
                 let new_log = find_log(&logs);
                 if new_log != current_log {
+                    if let Some(ref mut current_log_process) = current_log_process {
+                        current_log_process.kill().unwrap();
+                    }
                     if let Some(ref new_log) = new_log {
                         green_log!("Watching", "new log: {:?}", new_log);
+                        current_log_process =
+                            Some(duct::cmd!("tail", "-f", new_log).start().unwrap());
                     } else {
                         green_log!("Watching", "no log found");
                     }
                     current_log = new_log;
-                    current_line = 0;
                 }
 
                 if let Some(ref current_log) = current_log {
@@ -360,16 +365,6 @@ fn watch_log() {
                         let panic = std::fs::read_to_string(&panic_path).unwrap();
                         red_log!("Panicked", "{}", panic);
                     }
-                }
-            }
-            notify::EventKind::Modify(_) => {
-                if let Some(ref current_log) = current_log {
-                    let log = std::fs::read_to_string(current_log).unwrap();
-                    let lines = log.lines().collect::<Vec<_>>();
-                    for line in lines.iter().skip(current_line) {
-                        println!("{}", line);
-                    }
-                    current_line = lines.len();
                 }
             }
             _ => {
