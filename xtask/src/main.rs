@@ -1,11 +1,11 @@
+use clap::{Parser, Subcommand};
+use colored::Colorize;
+use notify::Watcher;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
 };
-
-use clap::{Parser, Subcommand};
-use colored::Colorize;
-use serde::{Deserialize, Serialize};
 
 macro_rules! green_log {
     ($subject:expr, $($args:tt)+) => {
@@ -15,6 +15,11 @@ macro_rules! green_log {
 macro_rules! blue_log {
     ($subject:expr, $($args:tt)+) => {
         println!("{:>12} {}", $subject.bold().cyan(), &format!($($args)*));
+    };
+}
+macro_rules! red_log {
+    ($subject:expr, $($args:tt)+) => {
+        println!("{:>12} {}", $subject.bold().red(), &format!($($args)*));
     };
 }
 
@@ -45,7 +50,7 @@ enum SubCommands {
 
     /// ログを確認する。
     #[command(version, about, long_about = None)]
-    TailLog,
+    WatchLog,
 }
 
 #[derive(Parser, Debug)]
@@ -309,7 +314,7 @@ fn generate_installer() {
     );
 }
 
-fn tail_log() {
+fn watch_log() {
     let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
@@ -318,20 +323,87 @@ fn tail_log() {
         panic!("Logs not found at {:?}", logs);
     }
 
-    let logs = std::fs::read_dir(&logs)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .collect::<Vec<_>>();
-    let last_log = logs.last().unwrap();
-
-    duct::cmd!("tail", "-f", &last_log)
-        .before_spawn(|command| {
-            blue_log!("Running", "{:?}", command);
-
-            Ok(())
-        })
-        .run()
+    let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+    let mut watcher =
+        notify::PollWatcher::new(tx, notify::Config::default().with_compare_contents(true))
+            .unwrap();
+    watcher
+        .watch(&logs, notify::RecursiveMode::Recursive)
         .unwrap();
+    let mut current_log = find_log(&logs);
+    let mut current_line = 0;
+
+    if let Some(ref current_log) = current_log {
+        green_log!("Watching", "current log: {:?}", current_log);
+    } else {
+        green_log!("Watching", "no log found");
+    }
+
+    for event in rx {
+        let event = event.unwrap();
+        match event.kind {
+            notify::EventKind::Create(_) | notify::EventKind::Remove(_) => {
+                let new_log = find_log(&logs);
+                if new_log != current_log {
+                    if let Some(ref new_log) = new_log {
+                        green_log!("Watching", "new log: {:?}", new_log);
+                    } else {
+                        green_log!("Watching", "no log found");
+                    }
+                    current_log = new_log;
+                    current_line = 0;
+                }
+
+                if let Some(ref current_log) = current_log {
+                    let panic_path = current_log.with_extension("panic");
+                    if panic_path.exists() {
+                        let panic = std::fs::read_to_string(&panic_path).unwrap();
+                        red_log!("Panicked", "{}", panic);
+                    }
+                }
+            }
+            notify::EventKind::Modify(_) => {
+                if let Some(ref current_log) = current_log {
+                    let log = std::fs::read_to_string(current_log).unwrap();
+                    let lines = log.lines().collect::<Vec<_>>();
+                    for line in lines.iter().skip(current_line) {
+                        println!("{}", line);
+                    }
+                    current_line = lines.len();
+                }
+            }
+            _ => {
+                continue;
+            }
+        }
+    }
+
+    fn find_log(logs_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+        let mut current_logs = std::fs::read_dir(&logs_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.is_file()
+                    && path.extension().unwrap_or_default() == "log"
+                    && path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.split('.').next().unwrap().parse::<u64>().is_ok())
+            })
+            .collect::<Vec<_>>();
+        current_logs.sort_by_key(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap()
+                .split('.')
+                .next()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+        });
+
+        current_logs.last().cloned()
+    }
 }
 
 fn main() {
@@ -350,8 +422,8 @@ fn main() {
         SubCommands::GenerateInstaller => {
             generate_installer();
         }
-        SubCommands::TailLog => {
-            tail_log();
+        SubCommands::WatchLog => {
+            watch_log();
         }
     }
 }

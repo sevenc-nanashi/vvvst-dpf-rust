@@ -75,7 +75,7 @@ Options:
 ### ログの確認
 
 ```bash
-❯ cargo xtask tail-log
+❯ cargo xtask watch-log
 ```
 
 ## 仕組み
