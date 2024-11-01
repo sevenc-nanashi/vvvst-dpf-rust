@@ -6,72 +6,21 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     ffi::c_void,
-    sync::{Arc, Mutex as SyncMutex},
+    num::NonZero,
+    ptr::NonNull,
+    sync::Arc,
 };
 use tokio::sync::{mpsc::UnboundedReceiver, Mutex};
 use tracing::{error, info, warn};
 
 static EDITOR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/resources/editor");
 pub struct PluginUiImpl {
-    window_handle: baseview::WindowHandle,
-
-    resize_request: Arc<SyncMutex<Option<(usize, usize)>>>,
-}
-
-struct WebViewWindowHandler {
     webview: Arc<wry::WebView>,
+
     _data_dir: tempfile::TempDir,
 
-    response_receiver: UnboundedReceiver<Response>,
     notification_receiver: UnboundedReceiver<UiNotification>,
-    resize_request: Arc<SyncMutex<Option<(usize, usize)>>>,
-}
-impl baseview::WindowHandler for WebViewWindowHandler {
-    fn on_frame(&mut self, window: &mut baseview::Window) {
-        while let Ok(message) = self.response_receiver.try_recv() {
-            let response = serde_json::to_string(&message).unwrap();
-
-            if let Err(err) = self
-                .webview
-                .evaluate_script(&format!(r#"window.onIpcResponse({})"#, response))
-            {
-                error!("failed to send response: {}", err);
-            }
-        }
-
-        if let Ok(notification) = self.notification_receiver.try_recv() {
-            info!("rust->js notification: {:?}", notification);
-            let js = format!(
-                r#"window.onIpcNotification({})"#,
-                serde_json::to_string(&notification).unwrap()
-            );
-            if let Err(err) = self.webview.evaluate_script(&js) {
-                error!("failed to send notification: {}", err);
-            }
-        }
-
-        if let Some((width, height)) = self.resize_request.lock().unwrap().take() {
-            window.resize(baseview::Size::new(width as f64, height as f64));
-        }
-    }
-    fn on_event(
-        &mut self,
-        _window: &mut baseview::Window,
-        event: baseview::Event,
-    ) -> baseview::EventStatus {
-        match event {
-            baseview::Event::Window(baseview::WindowEvent::Resized(size)) => {
-                self.webview.set_bounds(wry::Rect {
-                    x: 0,
-                    y: 0,
-                    width: size.logical_size().width as _,
-                    height: size.logical_size().height as _,
-                });
-                baseview::EventStatus::Captured
-            }
-            _ => baseview::EventStatus::Ignored,
-        }
-    }
+    response_receiver: UnboundedReceiver<Response>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,32 +29,26 @@ pub enum UiNotification {
     UpdatePlayingState(bool),
 }
 
-struct WindowHandle {
-    handle: usize,
-}
-unsafe impl raw_window_handle::HasRawWindowHandle for WindowHandle {
-    fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
-        if cfg!(target_os = "windows") {
-            let mut rwh = raw_window_handle::Win32WindowHandle::empty();
-            rwh.hwnd = self.handle as *mut c_void;
-            raw_window_handle::RawWindowHandle::Win32(rwh)
-        } else if cfg!(target_os = "macos") {
-            let mut rwh = raw_window_handle::AppKitWindowHandle::empty();
-            rwh.ns_view = self.handle as *mut c_void;
-            raw_window_handle::RawWindowHandle::AppKit(rwh)
-        } else if cfg!(target_os = "linux") {
-            let mut rwh = raw_window_handle::XcbWindowHandle::empty();
-            rwh.window = self.handle as _;
-            raw_window_handle::RawWindowHandle::Xcb(rwh)
-        } else {
-            unreachable!()
-        }
-    }
-}
-
 impl PluginUiImpl {
     pub unsafe fn new(handle: usize, plugin: Arc<Mutex<PluginImpl>>) -> Result<Self> {
-        let raw_window_handle = WindowHandle { handle };
+        let raw_window_handle = if cfg!(target_os = "windows") {
+            raw_window_handle::RawWindowHandle::Win32(raw_window_handle::Win32WindowHandle::new(
+                NonZero::new(handle as isize).ok_or_else(|| anyhow::anyhow!("handle is zero"))?,
+            ))
+        } else if cfg!(target_os = "macos") {
+            raw_window_handle::RawWindowHandle::AppKit(raw_window_handle::AppKitWindowHandle::new(
+                NonNull::new(handle as *mut c_void)
+                    .ok_or_else(|| anyhow::anyhow!("handle is zero"))?
+                    .cast(),
+            ))
+        } else if cfg!(target_os = "linux") {
+            raw_window_handle::RawWindowHandle::Xcb(raw_window_handle::XcbWindowHandle::new(
+                NonZero::new(handle as u32).ok_or_else(|| anyhow::anyhow!("handle is zero"))?,
+            ))
+        } else {
+            unreachable!()
+        };
+        let window_handle = raw_window_handle::WindowHandle::borrow_raw(raw_window_handle);
 
         let (notification_sender, notification_receiver) = tokio::sync::mpsc::unbounded_channel();
         {
@@ -117,136 +60,131 @@ impl PluginUiImpl {
             tokio::sync::mpsc::unbounded_channel::<Response>();
         let response_sender = Arc::new(response_sender);
 
-        let resize_request = Arc::new(SyncMutex::new(None));
-        let resize_request_ref = Arc::clone(&resize_request);
-
         let plugin_ref = Arc::clone(&plugin);
+
+        let temp_dir = tempfile::TempDir::new()?;
+        let mut web_context = wry::WebContext::new(Some(temp_dir.path().to_path_buf()));
+        let webview_builder = wry::WebViewBuilder::with_web_context(&mut web_context)
+            .with_clipboard(true)
+            .with_background_color((165, 212, 173, 255))
+            .with_custom_protocol("app".to_string(), |_id, request| {
+                let path = request.uri().path();
+                EDITOR
+                    .get_file(path.trim_start_matches('/'))
+                    .map(|file| {
+                        info!("serving file: {:?}", file.path());
+                        wry::http::Response::builder()
+                            .status(200)
+                            .header(
+                                "Content-Type",
+                                mime_guess::from_path(file.path())
+                                    .first_or_octet_stream()
+                                    .as_ref(),
+                            )
+                            .body(Cow::Borrowed(file.contents()))
+                            .unwrap()
+                    })
+                    .unwrap_or_else(|| {
+                        wry::http::Response::builder()
+                            .status(404)
+                            .body(Cow::Borrowed(b"" as &[u8]))
+                            .unwrap()
+                    })
+            })
+            .with_url(if cfg!(debug_assertions) {
+                option_env!("VVVST_DEV_SERVER_URL").unwrap_or("http://localhost:5173")
+            } else {
+                "app://vvvst.localhost/index.html"
+            })
+            .with_ipc_handler(move |message| {
+                let response_sender = Arc::clone(&response_sender);
+                let plugin_ref = Arc::clone(&plugin_ref);
+                let message = message.body().to_string();
+                RUNTIME.spawn(async move {
+                    let value = match serde_json::from_str::<serde_json::Value>(&message) {
+                        Ok(value) => value,
+                        Err(err) => {
+                            error!("failed to parse message: {}", err);
+                            return;
+                        }
+                    };
+                    let value = match serde_json::from_value::<Request>(value.clone()) {
+                        Ok(value) => value,
+                        Err(err) => {
+                            // 可能な限りエラーを返してあげる
+                            let request_id = value["requestId"].as_u64();
+                            if let Some(request_id) = request_id {
+                                let response = Response {
+                                    request_id: RequestId(request_id as u32),
+                                    payload: Err(format!("failed to parse request: {}", err)),
+                                };
+                                warn!("failed to parse request: {}", err);
+                                if let Err(err) = response_sender.send(response) {
+                                    error!("failed to send response: {}", err);
+                                }
+                            } else {
+                                error!("failed to parse request: {}", err);
+                            }
+                            return;
+                        }
+                    };
+                    let result = PluginUiImpl::handle_request(plugin_ref, value.inner).await;
+                    let response = Response {
+                        request_id: value.request_id,
+                        payload: match result {
+                            Ok(value) => Ok(value),
+                            Err(err) => Err(err.to_string()),
+                        },
+                    };
+                    if let Err(err) = response_sender.send(response) {
+                        error!("failed to send response: {}", err);
+                    }
+                });
+            });
 
         #[cfg(target_os = "linux")]
         {
             gtk::init()?;
         }
+        let webview = webview_builder.build_as_child(&window_handle)?;
+        let webview = Arc::new(webview);
 
-        let window_handle = baseview::Window::open_parented(
-            &raw_window_handle,
-            baseview::WindowOpenOptions {
-                title: "VVVST".to_string(),
-                size: baseview::Size::new(800.0, 600.0),
-                scale: baseview::WindowScalePolicy::SystemScaleFactor,
-            },
-            move |window| {
-                let temp_dir = tempfile::TempDir::new().unwrap();
-                let mut web_context = wry::WebContext::new(Some(temp_dir.path().to_path_buf()));
-                let webview = wry::WebViewBuilder::new_as_child(window)
-                    .with_web_context(&mut web_context)
-                    .with_clipboard(true)
-                    .with_background_color((165, 212, 173, 255))
-                    .with_custom_protocol("app".to_string(), |request| {
-                        let path = request.uri().path();
-                        EDITOR
-                            .get_file(path.trim_start_matches('/'))
-                            .map(|file| {
-                                info!("serving file: {:?}", file.path());
-                                wry::http::Response::builder()
-                                    .status(200)
-                                    .header(
-                                        "Content-Type",
-                                        mime_guess::from_path(file.path())
-                                            .first_or_octet_stream()
-                                            .as_ref(),
-                                    )
-                                    .body(Cow::Borrowed(file.contents()))
-                                    .unwrap()
-                            })
-                            .unwrap_or_else(|| {
-                                wry::http::Response::builder()
-                                    .status(404)
-                                    .body(Cow::Borrowed(b"" as &[u8]))
-                                    .unwrap()
-                            })
-                    })
-                    .with_ipc_handler(move |message| {
-                        let response_sender = Arc::clone(&response_sender);
-                        let plugin_ref = Arc::clone(&plugin_ref);
-                        let message = message.to_string();
-                        RUNTIME.spawn(async move {
-                            let value = match serde_json::from_str::<serde_json::Value>(&message) {
-                                Ok(value) => value,
-                                Err(err) => {
-                                    error!("failed to parse message: {}", err);
-                                    return;
-                                }
-                            };
-                            let value = match serde_json::from_value::<Request>(value.clone()) {
-                                Ok(value) => value,
-                                Err(err) => {
-                                    // 可能な限りエラーを返してあげる
-                                    let request_id = value["requestId"].as_u64();
-                                    if let Some(request_id) = request_id {
-                                        let response = Response {
-                                            request_id: RequestId(request_id as u32),
-                                            payload: Err(format!(
-                                                "failed to parse request: {}",
-                                                err
-                                            )),
-                                        };
-                                        warn!("failed to parse request: {}", err);
-                                        if let Err(err) = response_sender.send(response) {
-                                            error!("failed to send response: {}", err);
-                                        }
-                                    } else {
-                                        error!("failed to parse request: {}", err);
-                                    }
-                                    return;
-                                }
-                            };
-                            let result =
-                                PluginUiImpl::handle_request(plugin_ref, value.inner).await;
-                            let response = Response {
-                                request_id: value.request_id,
-                                payload: match result {
-                                    Ok(value) => Ok(value),
-                                    Err(err) => Err(err.to_string()),
-                                },
-                            };
-                            if let Err(err) = response_sender.send(response) {
-                                error!("failed to send response: {}", err);
-                            }
-                        });
-                    })
-                    .with_url(if cfg!(debug_assertions) {
-                        option_env!("VVVST_DEV_SERVER_URL").unwrap_or("http://localhost:5173")
-                    } else {
-                        "app://vvvst.localhost/index.html"
-                    })
-                    .unwrap()
-                    .build()
-                    .unwrap();
-
-                let webview = Arc::new(webview);
-
-                let handler = WebViewWindowHandler {
-                    webview: Arc::clone(&webview),
-                    _data_dir: temp_dir,
-                    response_receiver,
-                    notification_receiver,
-                    resize_request: resize_request_ref,
-                };
-                handler
-            },
-        );
         Ok(PluginUiImpl {
-            window_handle,
-            resize_request,
+            webview,
+
+            _data_dir: temp_dir,
+
+            notification_receiver,
+            response_receiver,
         })
     }
 
     pub fn idle(&mut self) -> Result<()> {
+        while let Ok(message) = self.response_receiver.try_recv() {
+            let response = serde_json::to_string(&message).unwrap();
+
+            self.webview
+                .evaluate_script(&format!(r#"window.onIpcResponse({})"#, response))?;
+        }
+
+        if let Ok(notification) = self.notification_receiver.try_recv() {
+            info!("rust->js notification: {:?}", notification);
+            let js = format!(
+                r#"window.onIpcNotification({})"#,
+                serde_json::to_string(&notification).unwrap()
+            );
+            self.webview.evaluate_script(&js)?;
+        }
+
         Ok(())
     }
 
     pub fn set_size(&self, width: usize, height: usize) -> Result<()> {
-        *self.resize_request.lock().unwrap() = Some((width, height));
+        self.webview.set_bounds(wry::Rect {
+            position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
+            size: winit::dpi::LogicalSize::new(width as f64, height as f64).into(),
+        })?;
+
         Ok(())
     }
 
@@ -426,11 +364,5 @@ impl PluginUiImpl {
                 }
             }
         }
-    }
-}
-
-impl Drop for PluginUiImpl {
-    fn drop(&mut self) {
-        self.window_handle.close();
     }
 }
