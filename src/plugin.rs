@@ -27,7 +27,7 @@ pub struct PluginImpl {
 
     pub voice_caches: HashMap<SingingVoiceKey, Vec<u8>>,
 
-    prev_position: usize,
+    prev_position: i64,
     prev_is_playing: bool,
 
     pub current_position: f32,
@@ -273,7 +273,7 @@ impl PluginImpl {
         outputs: &mut [&mut [f32]],
         sample_rate: f32,
         is_playing: bool,
-        current_sample: usize,
+        current_sample: i64,
     ) {
         for output in outputs.iter_mut() {
             for sample in output.iter_mut() {
@@ -299,7 +299,11 @@ impl PluginImpl {
                 }
                 if is_playing {
                     for i in 0..outputs[0].len() {
-                        let current_frame = current_sample + i;
+                        let current_frame = current_sample + i as i64;
+                        if current_frame < 0 {
+                            continue;
+                        }
+                        let current_frame = current_frame as usize;
                         if current_frame < mix.samples_len {
                             for (track_id, track) in params.tracks.iter() {
                                 let Some(track_samples) = &samples.get(track_id) else {
@@ -352,7 +356,7 @@ impl PluginImpl {
 
             if this.prev_position != current_sample {
                 this.prev_position = current_sample;
-                this.current_position = current_sample as f32 / sample_rate;
+                this.current_position = (current_sample as f32 / sample_rate).max(0.0);
                 this.current_position_updated = true;
             }
             if this.prev_is_playing != is_playing {

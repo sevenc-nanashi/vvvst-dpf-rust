@@ -31,7 +31,6 @@ pub enum UiNotification {
 
 impl PluginUiImpl {
     pub unsafe fn new(handle: usize, plugin: Arc<Mutex<PluginImpl>>) -> Result<Self> {
-        info!("handle: {}", handle);
         let raw_window_handle = if cfg!(target_os = "windows") {
             raw_window_handle::RawWindowHandle::Win32(raw_window_handle::Win32WindowHandle::new(
                 NonZero::new(handle as isize).ok_or_else(|| anyhow::anyhow!("handle is zero"))?,

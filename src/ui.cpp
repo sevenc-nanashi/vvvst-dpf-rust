@@ -1,6 +1,7 @@
 #include "DistrhoUI.hpp"
 #include "plugin.hpp"
 #include "rust.generated.hpp"
+#include <mutex>
 
 START_NAMESPACE_DISTRHO
 
@@ -8,34 +9,37 @@ START_NAMESPACE_DISTRHO
 
 class VvvstUi : public UI {
 public:
-  VvvstUi() : UI() {
-    initializeRustUi();
-  }
+  VvvstUi() : UI() { initializeRustUi(); }
   ~VvvstUi() override {
     if (!inner) {
       return;
     }
+    auto _lock = std::unique_lock(this->mutex);
     Rust::plugin_ui_drop(inner);
   };
 
   void parameterChanged(uint32_t index, float value) override {}
 
   void sizeChanged(uint width, uint height) override {
+    auto lock = std::unique_lock(this->mutex);
     UI::sizeChanged(width, height);
     onSizeChanged(width, height);
   }
 
   void uiIdle() override {
-    if (!inner) {
-      if (uiRetried) {
+    auto lock = std::unique_lock(this->mutex, std::defer_lock);
+    if (lock.try_lock()) {
+      if (!inner) {
+        if (uiRetried) {
+          return;
+        }
+
+        // Cubaseだとコンストラクト直後にRust側を初期化すると失敗することがあるので、1回だけリトライする
+        initializeRustUi();
         return;
       }
-
-      // Cubaseだとコンストラクト直後にRust側を初期化すると失敗することがあるので、1回だけリトライする
-      initializeRustUi();
-      return;
+      Rust::plugin_ui_idle(inner);
     }
-    Rust::plugin_ui_idle(inner);
   }
 
   void stateChanged(const char *key, const char *value) override {}
@@ -48,6 +52,7 @@ public:
   }
 
 private:
+  std::mutex mutex;
   Rust::PluginUi *inner;
   bool uiRetried = false;
 
@@ -57,7 +62,7 @@ private:
     if (!inner) {
       return;
     }
-    sizeChanged(this->getWidth(), this->getHeight());
+    Rust::plugin_ui_set_size(inner, this->getWidth(), this->getHeight());
   }
 
   /**

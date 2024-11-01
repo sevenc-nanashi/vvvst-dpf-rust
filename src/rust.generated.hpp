@@ -44,7 +44,7 @@ void plugin_run(const Plugin *plugin,
                 float sample_rate,
                 uintptr_t sample_count,
                 bool is_playing,
-                uintptr_t current_sample);
+                int64_t current_sample);
 
 EXPORT void plugin_drop(Plugin *plugin);
 

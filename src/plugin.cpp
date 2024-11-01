@@ -100,7 +100,9 @@ void VvvstPlugin::run(const float **inputs, float **outputs, uint32_t frames,
                       const MidiEvent *_midiEvents, uint32_t _midiEventCount) {
   auto sampleRate = this->getSampleRate();
   auto timePosition = this->getTimePosition();
-  auto samplePosition = timePosition.frame;
+  // timePosition.frameはuint64_tだが、Cubaseだと稀にtimePosition.frameが負の値になってとんでもない値になることがあるので、
+  // int64_tに変換しておく
+  int64_t samplePosition = timePosition.frame;
   auto isPlaying = timePosition.playing;
   Rust::plugin_run(inner, outputs, sampleRate, frames, isPlaying,
                    samplePosition);

@@ -93,7 +93,7 @@ unsafe extern "C-unwind" fn plugin_run(
     sample_rate: f32,
     sample_count: usize,
     is_playing: bool,
-    current_sample: usize,
+    current_sample: i64,
 ) {
     let mut outputs = std::slice::from_raw_parts_mut(outputs, NUM_CHANNELS as usize)
         .iter_mut()
