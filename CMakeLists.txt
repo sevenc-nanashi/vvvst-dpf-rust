@@ -37,12 +37,19 @@ dpf_add_plugin(
   FILES_UI src/ui.cpp)
 
 if(APPLE)
+  # Mac: arm64をサポート
+  set(CMAKE_OSX_ARCHITECTURES "arm64")
+  # もしx86_64もサポートする場合は以下のように設定
+  # set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64")
+
   # Mac：色々リンクする
   enable_language(OBJC)
   target_link_libraries(${VVVST_NAME} PRIVATE "-framework CoreFoundation")
   target_link_libraries(${VVVST_NAME} PRIVATE "-framework CoreGraphics")
+  target_link_libraries(${VVVST_NAME} PRIVATE "-framework CoreServices")
   target_link_libraries(${VVVST_NAME} PRIVATE "-framework AppKit")
   target_link_libraries(${VVVST_NAME} PRIVATE "-framework QuartzCore")
+  target_link_libraries(${VVVST_NAME} PRIVATE "-framework Carbon")
   set_target_properties(${VVVST_NAME} PROPERTIES LINK_FLAGS
                                                  "-Wl,-F/Library/Frameworks")
 endif()
