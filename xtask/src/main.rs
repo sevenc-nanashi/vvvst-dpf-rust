@@ -324,9 +324,7 @@ fn watch_log() {
     }
 
     let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
-    let mut watcher =
-        notify::PollWatcher::new(tx, notify::Config::default().with_compare_contents(true))
-            .unwrap();
+    let mut watcher = notify::recommended_watcher(tx).unwrap();
     watcher
         .watch(&logs, notify::RecursiveMode::Recursive)
         .unwrap();
