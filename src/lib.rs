@@ -126,9 +126,10 @@ unsafe extern "C-unwind" fn plugin_ui_new(
     plugin: &Plugin,
     width: usize,
     height: usize,
+    scale_factor: f64,
 ) -> *mut PluginUi {
     let plugin_ref = Arc::clone(&plugin.inner);
-    let plugin_ui = match ui::PluginUiImpl::new(handle, plugin_ref, width, height) {
+    let plugin_ui = match ui::PluginUiImpl::new(handle, plugin_ref, width, height, scale_factor) {
         Ok(plugin_ui) => {
             info!("PluginUi created");
             plugin_ui
@@ -145,9 +146,14 @@ unsafe extern "C-unwind" fn plugin_ui_new(
 }
 
 #[no_mangle]
-unsafe extern "C-unwind" fn plugin_ui_set_size(plugin_ui: &PluginUi, width: usize, height: usize) {
+unsafe extern "C-unwind" fn plugin_ui_set_size(
+    plugin_ui: &PluginUi,
+    width: usize,
+    height: usize,
+    scale_factor: f64,
+) {
     let plugin_ui = plugin_ui.inner.blocking_lock();
-    if let Err(err) = plugin_ui.set_size(width, height) {
+    if let Err(err) = plugin_ui.set_size(width, height, scale_factor) {
         error!("Failed to set size: {}", err);
     }
 }

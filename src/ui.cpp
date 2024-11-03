@@ -42,9 +42,8 @@ public:
     if (!inner) {
       return;
     }
-    auto scaleFactor = this->getScaleFactor();
-    Rust::plugin_ui_set_size(inner.get(), width * scaleFactor,
-                             height * scaleFactor);
+    auto scale_factor = this->getScaleFactor();
+    Rust::plugin_ui_set_size(inner.get(), width, height, scale_factor);
   }
 
 private:
@@ -55,15 +54,19 @@ private:
   void initializeRustUi() {
     auto lock = std::unique_lock(this->mutex);
     if (inner) {
-      return;
+        return;
     }
     auto plugin = static_cast<VvvstPlugin *>(this->getPluginInstancePointer());
-    auto scaleFactor = this->getScaleFactor();
     inner = std::shared_ptr<Rust::PluginUi>(
-        Rust::plugin_ui_new(this->getParentWindowHandle(), plugin->inner.get(),
-                            this->getWidth() * scaleFactor,
-                            this->getHeight() * scaleFactor),
-        [](Rust::PluginUi *inner) { Rust::plugin_ui_drop(inner); });
+        Rust::plugin_ui_new(
+            this->getParentWindowHandle(),
+            plugin->inner.get(),
+            this->getWidth(),
+            this->getHeight(),
+            this->getScaleFactor()
+        ),
+        [](Rust::PluginUi *inner) { Rust::plugin_ui_drop(inner); }
+    );
     if (!inner) {
       return;
     }

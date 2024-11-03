@@ -52,9 +52,10 @@ EXPORT
 PluginUi *plugin_ui_new(uintptr_t handle,
                         const Plugin *plugin,
                         uintptr_t width,
-                        uintptr_t height);
+                        uintptr_t height,
+                        double scale_factor);
 
-EXPORT void plugin_ui_set_size(const PluginUi *plugin_ui, uintptr_t width, uintptr_t height);
+EXPORT void plugin_ui_set_size(const PluginUi *plugin_ui, uintptr_t width, uintptr_t height, double scale_factor);
 
 EXPORT void plugin_ui_idle(const PluginUi *plugin_ui);
 
