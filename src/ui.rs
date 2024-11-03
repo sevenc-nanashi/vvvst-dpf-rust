@@ -190,11 +190,9 @@ impl PluginUiImpl {
     }
 
     pub fn set_size(&self, width: usize, height: usize, scale_factor: f64) -> Result<()> {
-        let scaled_width = (width as f64 / scale_factor) as u32;
-        let scaled_height = (height as f64 / scale_factor) as u32;
         self.webview.set_bounds(wry::Rect {
             position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
-            size: winit::dpi::LogicalSize::new(scaled_width as f64, scaled_height as f64).into(),
+            size: winit::dpi::LogicalSize::new(width as f64 / scale_factor, height as f64 / scale_factor).into(),
         })?;
         Ok(())
     }
