@@ -262,8 +262,8 @@ impl PluginImpl {
     }
 
     pub fn get_state(&self) -> String {
-        let params = self.params.blocking_read();
-        let state = bincode::serialize(&*params).unwrap();
+        let params = { self.params.blocking_read().clone() };
+        let state = bincode::serialize(&params).unwrap();
         let state_compressed = zstd::encode_all(state.as_slice(), 22).unwrap();
         base64.encode(state_compressed.as_slice())
     }
