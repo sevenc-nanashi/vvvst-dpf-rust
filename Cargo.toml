@@ -6,13 +6,21 @@ edition = "2021"
 [workspace]
 members = ["xtask"]
 
+[[bin]]
+name = "engine-manager"
+path = "src/manager_main.rs"
+
 [dependencies]
 anyhow = "1.0.89"
 base64 = "0.22.1"
 bincode = "1.3.3"
+dirs = "5.0.1"
 duplicate = "2.0.0"
+fs2 = "0.4.3"
+futures = "0.3.31"
 include_dir = "0.7.4"
 mime_guess = "2.0.5"
+process_path = "0.1.4"
 raw-window-handle = "0.6.2"
 rfd = "0.15.0"
 serde = { version = "1.0.210", features = ["derive"] }
@@ -26,6 +34,7 @@ tokio = { version = "1.40.0", features = [
   "fs",
   "macros",
   "sync",
+  "net",
 ] }
 tracing = { version = "0.1.40", features = ["log"] }
 tracing-subscriber = "0.3.18"
