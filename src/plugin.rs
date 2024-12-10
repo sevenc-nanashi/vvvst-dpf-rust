@@ -264,7 +264,8 @@ impl PluginImpl {
     pub fn get_state(&self) -> String {
         let params = { self.params.blocking_read().clone() };
         let state = bincode::serialize(&params).unwrap();
-        let state_compressed = zstd::encode_all(state.as_slice(), 22).unwrap();
+        // 22以降は時間がかかるわりにそれほど効果が無いので3で固定する
+        let state_compressed = zstd::encode_all(state.as_slice(), 3).unwrap();
         base64.encode(state_compressed.as_slice())
     }
 
