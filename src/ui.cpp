@@ -1,6 +1,7 @@
-#include "DistrhoUI.hpp"
 #include "plugin.hpp"
 #include "rust.generated.hpp"
+#include <DistrhoUI.hpp>
+#include <dpf/dgl/Window.hpp>
 #include <memory>
 #include <mutex>
 
@@ -13,10 +14,10 @@ public:
   VvvstUi() : UI() { initializeRustUi(); }
   void parameterChanged(uint32_t index, float value) override {}
 
-  void sizeChanged(uint width, uint height) override {
+  void onResize(const ResizeEvent &size) override {
     auto lock = std::unique_lock(this->mutex);
-    UI::sizeChanged(width, height);
-    onSizeChanged(width, height);
+    UI::onResize(size);
+    onSizeChanged(size.size.getWidth(), size.size.getHeight());
   }
 
   void uiIdle() override {
@@ -54,19 +55,14 @@ private:
   void initializeRustUi() {
     auto lock = std::unique_lock(this->mutex);
     if (inner) {
-        return;
+      return;
     }
     auto plugin = static_cast<VvvstPlugin *>(this->getPluginInstancePointer());
     inner = std::shared_ptr<Rust::PluginUi>(
-        Rust::plugin_ui_new(
-            this->getParentWindowHandle(),
-            plugin->inner.get(),
-            this->getWidth(),
-            this->getHeight(),
-            this->getScaleFactor()
-        ),
-        [](Rust::PluginUi *inner) { Rust::plugin_ui_drop(inner); }
-    );
+        Rust::plugin_ui_new(this->getWindow().getNativeWindowHandle(),
+                            plugin->inner.get(), this->getWidth(),
+                            this->getHeight(), this->getScaleFactor()),
+        [](Rust::PluginUi *inner) { Rust::plugin_ui_drop(inner); });
     if (!inner) {
       return;
     }
