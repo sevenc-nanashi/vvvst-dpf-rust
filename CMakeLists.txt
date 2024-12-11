@@ -42,17 +42,6 @@ if(APPLE)
   # Mac: arm64をサポート
   set(CMAKE_OSX_ARCHITECTURES "arm64")
   # もしx86_64もサポートする場合は以下のように設定 set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64")
-
-  # Mac：色々リンクする
-  enable_language(OBJC)
-  target_link_libraries(${VVVST_NAME} PRIVATE "-framework CoreFoundation")
-  target_link_libraries(${VVVST_NAME} PRIVATE "-framework CoreGraphics")
-  target_link_libraries(${VVVST_NAME} PRIVATE "-framework CoreServices")
-  target_link_libraries(${VVVST_NAME} PRIVATE "-framework AppKit")
-  target_link_libraries(${VVVST_NAME} PRIVATE "-framework QuartzCore")
-  target_link_libraries(${VVVST_NAME} PRIVATE "-framework Carbon")
-  set_target_properties(${VVVST_NAME} PROPERTIES LINK_FLAGS
-                                                 "-Wl,-F/Library/Frameworks")
 endif()
 
 target_link_libraries(${VVVST_NAME} PRIVATE vvvst_impl)
@@ -62,6 +51,13 @@ target_compile_features(${VVVST_NAME} PUBLIC cxx_std_20)
 
 # https://qiita.com/canary_llama/items/d63f5007161cf4a2c4b3
 function(copy_dlls_to_target TARGET_NAME)
+  add_custom_command(
+    TARGET ${TARGET_NAME}
+    POST_BUILD
+    COMMAND
+      ${CMAKE_COMMAND} -E echo Copying DLLs to
+      $<TARGET_FILE_DIR:${TARGET_NAME}>: $<TARGET_RUNTIME_DLLS:${TARGET_NAME}>
+    COMMAND_EXPAND_LISTS)
   add_custom_command(
     TARGET ${TARGET_NAME}
     POST_BUILD

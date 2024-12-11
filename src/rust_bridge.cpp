@@ -1,8 +1,8 @@
-
 #include <choc/platform/choc_DynamicLibrary.h>
 #include <choc/platform/choc_Platform.h>
 #include <optional>
 #include <shared_mutex>
+#include <stdexcept>
 #include <whereami.h>
 
 namespace Rust {
