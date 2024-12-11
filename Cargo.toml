@@ -1,13 +1,10 @@
 [package]
-name = "vvvst-dpf-rust"
+name = "vvvst"
 version = "255.255.255"
 edition = "2021"
 
 [workspace]
 members = ["xtask"]
-
-[features]
-static_link_windows = []
 
 [dependencies]
 anyhow = "1.0.89"
@@ -38,7 +35,8 @@ wry = "0.46.3"
 zstd = "0.13.2"
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["cdylib"]
+name = "vvvst_impl"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.1"

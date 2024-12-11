@@ -1,7 +1,7 @@
 #pragma once
 #include "DistrhoPlugin.hpp"
 #include "extra/String.hpp"
-#include "rust.generated.hpp"
+#include "rust_bridge.generated.hpp"
 #include <memory>
 
 START_NAMESPACE_DISTRHO

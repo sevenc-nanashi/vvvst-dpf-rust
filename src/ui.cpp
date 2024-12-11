@@ -1,5 +1,5 @@
 #include "plugin.hpp"
-#include "rust.generated.hpp"
+#include "rust_bridge.generated.hpp"
 #include <DistrhoUI.hpp>
 #include <dpf/dgl/Window.hpp>
 #include <memory>

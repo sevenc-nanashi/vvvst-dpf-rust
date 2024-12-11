@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
+    io::Write,
 };
 
 macro_rules! green_log {
@@ -23,6 +24,12 @@ macro_rules! red_log {
     };
 }
 
+fn print_cmd(command: &std::process::Command) -> std::io::Result<()> {
+    blue_log!("Running", "{:?}", command);
+
+    Ok(())
+}
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -32,9 +39,9 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum SubCommands {
-    /// C++のヘッダーファイルを生成する。
+    /// C++ <-> Rustのブリッジを生成する。
     #[command(version, about, long_about = None)]
-    GenerateHeader,
+    GenerateBridge,
 
     /// プラグインをビルドする。
     #[command(version, about, long_about = None)]
@@ -66,16 +73,116 @@ struct BuildArgs {
     dev_server_url: Option<String>,
 }
 
-fn generate_header() {
+fn generate_bridge() {
+    blue_log!("Running", "cbindgen");
     let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
     let bindings = cbindgen::generate(&main_crate).unwrap();
-    let destination_path = main_crate.join("src/rust.generated.hpp");
-    bindings.write_to_file(&destination_path);
+    let mut cbindgen_binding = vec![];
+    bindings.write(&mut cbindgen_binding);
 
-    green_log!("Finished", "generated to {:?}", destination_path,);
+    let message = "xtaskによって生成。手動で編集しないでください。";
+
+    blue_log!("Generating", "rust_bridge.generated.hpp");
+    let contents = std::str::from_utf8(&cbindgen_binding).unwrap();
+    let re = lazy_regex::regex!(
+        r#"EXPORT\s+(?<returns>[\w ]+\s+\*?)(?<name>\w+)\s*\((?<args>[^)]*)\);"#
+    );
+    let mut functions = vec![];
+    for cap in re.captures_iter(&contents) {
+        let returns = cap.name("returns").unwrap().as_str();
+        let name = cap.name("name").unwrap().as_str();
+        let args = cap.name("args").unwrap().as_str();
+        let args = args
+            .split(',')
+            .map(|arg| {
+                let arg = arg.trim();
+                arg.split_whitespace()
+                    .filter(|arg| !arg.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect::<Vec<_>>();
+        functions.push((returns, name, args));
+    }
+
+    let types = contents
+        .lines()
+        .skip_while(|line| !line.contains("namespace Rust {"))
+        .skip(1)
+        .take_while(|line| !line.contains("extern \"C\" {"))
+        .collect::<Vec<_>>();
+    let types = types.join("\n");
+    assert!(!types.is_empty());
+
+    let bridge_header_path = main_crate.join("src/rust_bridge.generated.hpp");
+    let mut file = std::fs::File::create(&bridge_header_path).unwrap();
+    writeln!(file, "// {}", message).unwrap();
+    writeln!(file, "#pragma once").unwrap();
+    writeln!(file, "#include <choc/platform/choc_DynamicLibrary.h>").unwrap();
+    writeln!(file).unwrap();
+    writeln!(file, "namespace Rust {{").unwrap();
+    writeln!(file, "{}", types).unwrap();
+    for (returns, name, args) in &functions {
+        let args = args.join(", ");
+        writeln!(file, "    {} {}({});", returns, name, args).unwrap();
+        writeln!(file).unwrap();
+    }
+    writeln!(file, "}}").unwrap();
+
+    blue_log!("Generating", "rust_bridge.generated.cpp");
+    let bridge_path = main_crate.join("src/rust_bridge.generated.cpp");
+    let mut file = std::fs::File::create(&bridge_path).unwrap();
+    writeln!(file, "// {}", message).unwrap();
+    writeln!(file, "#include \"rust_bridge.generated.hpp\"").unwrap();
+    writeln!(file, "#include \"rust_bridge.hpp\"").unwrap();
+    writeln!(file).unwrap();
+    writeln!(file, "namespace Rust {{").unwrap();
+    for (returns, name, args) in &functions {
+        let args = args.join(", ");
+        writeln!(file, "    typedef {} (*{}_t)({});", returns, name, args).unwrap();
+        writeln!(file, "    {} {}({}) {{", returns, name, args).unwrap();
+        writeln!(file, "        auto rust = Rust::loadRustDll();").unwrap();
+        writeln!(
+            file,
+            "        auto fn = ({}_t)rust->findFunction(\"{}\");",
+            name, name
+        )
+        .unwrap();
+
+        let args_regex = lazy_regex::regex!(r"(?P<name>\w+)(?:,|$)");
+        let mut arg_names = vec![];
+        for cap in args_regex.captures_iter(&args) {
+            let name = cap.name("name").unwrap().as_str();
+            arg_names.push(name);
+        }
+        let arg_names = arg_names.join(", ");
+
+        if *returns != "void" {
+            writeln!(file, "        return fn({});", arg_names).unwrap();
+        } else {
+            writeln!(file, "        fn({});", arg_names).unwrap();
+        }
+        writeln!(file, "    }}").unwrap();
+        writeln!(file).unwrap();
+    }
+    writeln!(file, "}}").unwrap();
+
+    duct::cmd!("clang-format", "-i", &bridge_header_path)
+        .before_spawn(|command| print_cmd(command))
+        .run()
+        .unwrap();
+    duct::cmd!("clang-format", "-i", &bridge_path)
+        .before_spawn(|command| print_cmd(command))
+        .run()
+        .unwrap();
+
+    green_log!("Finished", "generated to:");
+    green_log!("", "- {:?}", bridge_header_path);
+    green_log!("", "- {:?}", bridge_path);
 }
+
 fn build(args: BuildArgs) {
     let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -140,21 +247,13 @@ fn build(args: BuildArgs) {
     } else {
         duct::cmd!("cmake", &build_type, &build_dir)
     }
-    .before_spawn(|command| {
-        blue_log!("Running", "{:?}", command);
-
-        Ok(())
-    })
+    .before_spawn(|command| print_cmd(command))
     .dir(main_crate)
     .run()
     .unwrap();
     duct::cmd!("cmake", "--build", &destination_path)
         .dir(main_crate)
-        .before_spawn(|command| {
-            blue_log!("Running", "{:?}", command);
-
-            Ok(())
-        })
+        .before_spawn(|command| print_cmd(command))
         .full_env(envs)
         .run()
         .unwrap();
@@ -298,11 +397,7 @@ fn generate_installer() {
 
     duct::cmd!("makensis", &installer_dist, "/INPUTCHARSET", "UTF8")
         .dir(main_crate)
-        .before_spawn(|command| {
-            blue_log!("Running", "{:?}", command);
-
-            Ok(())
-        })
+        .before_spawn(|command| print_cmd(command))
         .run()
         .unwrap();
     green_log!(
@@ -403,8 +498,8 @@ fn main() {
     let args = Args::parse();
 
     match args.subcommand {
-        SubCommands::GenerateHeader => {
-            generate_header();
+        SubCommands::GenerateBridge => {
+            generate_bridge();
         }
         SubCommands::Build(build_args) => {
             build(build_args);

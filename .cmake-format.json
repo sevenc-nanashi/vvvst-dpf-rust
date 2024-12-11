@@ -6,7 +6,8 @@
         "TARGETS": "*",
         "UI_TYPE": 1,
         "FILES_DSP": "*",
-        "FILES_UI": "*"
+        "FILES_UI": "*",
+        "FILES_COMMON": "*"
       }
     },
     "corrosion_import_crate": {

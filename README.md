@@ -42,11 +42,11 @@ Options:
   -V, --version  Print version
 ```
 
-### `.hpp` ファイル
+### `rust_bridge.generated.{cpp,hpp}`
 
 ```bash
-❯ cargo xtask generate-header --help
-Usage: xtask.exe generate-header
+❯ cargo xtask generate-bridge --help
+Usage: xtask.exe generate-bridge
 
 Options:
   -h, --help     Print help

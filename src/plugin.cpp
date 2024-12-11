@@ -1,7 +1,7 @@
 #include "plugin.hpp"
-#include "DistrhoDetails.hpp"
-#include "DistrhoPlugin.hpp"
-#include "rust.generated.hpp"
+#include "rust_bridge.generated.hpp"
+#include <DistrhoDetails.hpp>
+#include <DistrhoPlugin.hpp>
 #include <format>
 #include <string>
 // -----------------------------------------------------------------------------------------------------------
@@ -42,7 +42,7 @@ const char *VvvstPlugin::getMaker() const {
    Get the plugin homepage.
  */
 const char *VvvstPlugin::getHomePage() const {
-  return "https://github.com/sevenc-nanashi/vvvst-rust-dpf/";
+  return "https://github.com/sevenc-nanashi/vvvst-dpf-rust/";
 }
 
 /**
