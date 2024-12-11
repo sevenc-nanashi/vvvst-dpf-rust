@@ -55,8 +55,8 @@ function(copy_dlls_to_target TARGET_NAME)
     TARGET ${TARGET_NAME}
     POST_BUILD
     COMMAND
-      ${CMAKE_COMMAND} -E echo Copying DLLs to
-      $<TARGET_FILE_DIR:${TARGET_NAME}>: $<TARGET_RUNTIME_DLLS:${TARGET_NAME}>
+      ${CMAKE_COMMAND} -E echo
+      "Copying DLLs to $<TARGET_FILE_DIR:${TARGET_NAME}>: $<TARGET_RUNTIME_DLLS:${TARGET_NAME}>"
     COMMAND_EXPAND_LISTS)
   add_custom_command(
     TARGET ${TARGET_NAME}
