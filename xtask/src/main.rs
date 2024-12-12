@@ -227,6 +227,20 @@ fn build(args: BuildArgs) {
         args.release
     );
 
+    duct::cmd!(
+        "cargo",
+        "build",
+        "-p",
+        "vvvst",
+        "--profile",
+        if args.release { "release" } else { "dev" }
+    )
+    .before_spawn(|command| print_cmd(command))
+    .dir(main_crate)
+    .full_env(envs.clone())
+    .run()
+    .unwrap();
+
     let destination_path = main_crate.join("build").join(build_name);
 
     let current = std::time::Instant::now();
