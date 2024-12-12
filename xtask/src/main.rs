@@ -137,6 +137,7 @@ fn generate_bridge() {
     writeln!(file, "// {}", message).unwrap();
     writeln!(file, "#include \"rust_bridge.generated.hpp\"").unwrap();
     writeln!(file, "#include \"rust_bridge.hpp\"").unwrap();
+    writeln!(file, "#include <cstdint>").unwrap();
     writeln!(file).unwrap();
     writeln!(file, "namespace Rust {{").unwrap();
     for (returns, name, args) in &functions {

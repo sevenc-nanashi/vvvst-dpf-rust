@@ -154,7 +154,6 @@ jobs:
           echo "CC=gcc-14" >> $GITHUB_ENV
           echo "CXX=g++-14" >> $GITHUB_ENV
 
-      - uses: sevenc-nanashi/dotfiles@main
       - name: Build
         run: |
           cargo xtask build --release
