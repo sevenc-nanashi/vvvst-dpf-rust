@@ -1,6 +1,7 @@
 // xtaskによって生成。手動で編集しないでください。
 #pragma once
 #include <choc/platform/choc_DynamicLibrary.h>
+#include <cstdint>
 
 namespace Rust {
 

@@ -121,6 +121,7 @@ fn generate_bridge() {
     writeln!(file, "// {}", message).unwrap();
     writeln!(file, "#pragma once").unwrap();
     writeln!(file, "#include <choc/platform/choc_DynamicLibrary.h>").unwrap();
+    writeln!(file, "#include <cstdint>").unwrap();
     writeln!(file).unwrap();
     writeln!(file, "namespace Rust {{").unwrap();
     writeln!(file, "{}", types).unwrap();
@@ -137,7 +138,6 @@ fn generate_bridge() {
     writeln!(file, "// {}", message).unwrap();
     writeln!(file, "#include \"rust_bridge.generated.hpp\"").unwrap();
     writeln!(file, "#include \"rust_bridge.hpp\"").unwrap();
-    writeln!(file, "#include <cstdint>").unwrap();
     writeln!(file).unwrap();
     writeln!(file, "namespace Rust {{").unwrap();
     for (returns, name, args) in &functions {

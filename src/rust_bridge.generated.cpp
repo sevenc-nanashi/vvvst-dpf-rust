@@ -1,7 +1,6 @@
 // xtaskによって生成。手動で編集しないでください。
 #include "rust_bridge.generated.hpp"
 #include "rust_bridge.hpp"
-#include <cstdint>
 
 namespace Rust {
 typedef Version (*get_version_t)();
