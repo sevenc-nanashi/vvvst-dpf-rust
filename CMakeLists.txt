@@ -69,5 +69,17 @@ endfunction()
 
 copy_dlls_to_target(${VVVST_NAME}-vst3)
 if(TARGET ${VVVST_NAME}-au)
-  copy_dlls_to_target(${VVVST_NAME}-au)
+  # auはビルド後に１回実行されるので、それに間に合うようにコピーする。 -exportはDPF内部で使われている名前。
+  add_custom_command(
+    TARGET ${VVVST_NAME}-export
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E echo
+            "Copying ${VVVST_IMPL_NAME} to $<TARGET_FILE_DIR:${VVVST_NAME}-au>")
+  add_custom_command(
+    TARGET ${VVVST_NAME}-export
+    POST_BUILD
+    COMMAND
+      ${CMAKE_COMMAND} -E copy_if_different
+      ${CMAKE_CURRENT_SOURCE_DIR}/target/${RUST_PROFILE}/${VVVST_IMPL_NAME}
+      $<TARGET_FILE_DIR:${VVVST_NAME}-au>)
 endif()
