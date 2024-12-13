@@ -69,5 +69,7 @@ endfunction()
 
 copy_dlls_to_target(${VVVST_NAME}-vst3)
 if(TARGET ${VVVST_NAME}-au)
+  # DPFがビルド時に-exportを実行するので、それが落ちないようにコピー対象に含める
+  copy_dlls_to_target(${VVVST_NAME}-export)
   copy_dlls_to_target(${VVVST_NAME}-au)
 endif()
