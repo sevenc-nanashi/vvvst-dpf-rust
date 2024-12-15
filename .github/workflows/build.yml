@@ -75,7 +75,7 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: build-editor
+          name: resource-editor
           path: dist/
 
       - name: Emit information
@@ -115,7 +115,7 @@ jobs:
       - name: Download Editor
         uses: actions/download-artifact@v4
         with:
-          name: build-editor
+          name: resource-editor
           path: resources/editor
 
       - name: Determine Information
