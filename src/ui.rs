@@ -73,7 +73,11 @@ impl PluginUiImpl {
         let webview_builder = wry::WebViewBuilder::with_web_context(&mut web_context)
             .with_bounds(wry::Rect {
                 position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
-                size: winit::dpi::LogicalSize::new(width as f64 / scale_factor, height as f64 / scale_factor).into(),
+                size: winit::dpi::LogicalSize::new(
+                    width as f64 / scale_factor,
+                    height as f64 / scale_factor,
+                )
+                .into(),
             })
             .with_clipboard(true)
             .with_background_color((165, 212, 173, 255))
@@ -192,7 +196,11 @@ impl PluginUiImpl {
     pub fn set_size(&self, width: usize, height: usize, scale_factor: f64) -> Result<()> {
         self.webview.set_bounds(wry::Rect {
             position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
-            size: winit::dpi::LogicalSize::new(width as f64 / scale_factor, height as f64 / scale_factor).into(),
+            size: winit::dpi::LogicalSize::new(
+                width as f64 / scale_factor,
+                height as f64 / scale_factor,
+            )
+            .into(),
         })?;
         Ok(())
     }

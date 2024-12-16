@@ -43,7 +43,7 @@ target_include_directories(${VVVST_NAME} PUBLIC "src" "deps"
 target_compile_features(${VVVST_NAME} PUBLIC cxx_std_20)
 
 # https://qiita.com/canary_llama/items/d63f5007161cf4a2c4b3
-function(copy_dlls_to_target TARGET_NAME)
+function(copy_assets_to_target TARGET_NAME)
   if(MSVC)
     set(VVVST_IMPL_NAME "vvvst_impl.dll")
   elseif(APPLE)
@@ -67,9 +67,9 @@ function(copy_dlls_to_target TARGET_NAME)
     COMMAND_EXPAND_LISTS)
 endfunction()
 
-copy_dlls_to_target(${VVVST_NAME}-vst3)
+copy_assets_to_target(${VVVST_NAME}-vst3)
 if(TARGET ${VVVST_NAME}-au)
   # DPFがビルド時に-exportを実行するので、それが落ちないようにコピー対象に含める
-  copy_dlls_to_target(${VVVST_NAME}-export)
-  copy_dlls_to_target(${VVVST_NAME}-au)
+  copy_assets_to_target(${VVVST_NAME}-export)
+  copy_assets_to_target(${VVVST_NAME}-au)
 endif()
