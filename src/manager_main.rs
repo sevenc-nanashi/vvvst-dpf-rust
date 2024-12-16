@@ -1,5 +1,6 @@
 //! エンジン管理。
 //! TCP通信でVSTインスタンスとのやり取りを行い、エンジンのArc的なものを提供する。
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod manager;
 
@@ -74,7 +75,10 @@ static CURRENT_CONNECTIONS: LazyLock<tokio::sync::Mutex<CurrentConnections>> =
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
     let lock_path = manager_path().join("lock");
     let state_path = manager_path().join("state");
     let store_path = manager_path().join("store");
@@ -113,11 +117,26 @@ async fn main() -> Result<()> {
                 tokio::fs::write(&store_path, bincode::serialize(&Store { engine_path })?).await?;
             } else {
                 let engine_path = if cfg!(target_os = "linux") {
-                    let appimage_or_run = rfd::AsyncFileDialog::new()
-                        .pick_file()
-                        .await
-                        .context("failed to pick engine file")?;
-                    appimage_or_run.path().to_path_buf()
+                    loop {
+                        let appimage_or_run = rfd::AsyncFileDialog::new()
+                            .pick_file()
+                            .await
+                            .context("failed to pick engine file")?;
+                        let appimage_or_run = appimage_or_run.path().to_path_buf();
+                        if appimage_or_run.extension().unwrap() == "AppImage"
+                            || appimage_or_run.file_name() == Some(std::ffi::OsStr::new("run"))
+                        {
+                            break appimage_or_run;
+                        }
+                        rfd::AsyncMessageDialog::new()
+                        .set_title("エンジンまたはAppImageが見つかりません")
+                        .set_description(
+                            "エンジンまたはAppImageが見つかりませんでした。VOICEVOXのAppImageまたはrunファイルを選択し直してください。",
+                        )
+                        .set_buttons(rfd::MessageButtons::Ok)
+                        .show()
+                        .await;
+                    }
                 } else {
                     loop {
                         let voicevox_dir = rfd::AsyncFileDialog::new()
@@ -161,6 +180,8 @@ async fn main() -> Result<()> {
         let mut engine_process = tokio::process::Command::new(engine_path)
             .arg("--port")
             .arg(random_port.to_string())
+            .stdout(std::io::stderr())
+            .stderr(std::io::stderr())
             .spawn()?;
         let no_connections = async {
             loop {
@@ -280,10 +301,6 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
                         let mut last_ping_inner = last_ping.lock().await;
                         *last_ping_inner = std::time::Instant::now();
                     }
-                    manager::ToManagerMessage::Exit => {
-                        info!("Exit received");
-                        break Ok(());
-                    }
                 }
             }
         }
@@ -294,7 +311,7 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
             let mut previous_engine_status = EngineStatus::NotRunning;
             // NOTE: 1秒ごとにエンジンの状態を確認する
             // 本来はcrossbeamとかを使うべきだが、エンジンの起動は長いのでポーリングによる実装でも
-            // それほど問題にはならないと思われる
+            // それほど問題にはならないと思われる。あとシンプルに面倒
             loop {
                 let engine_status = ENGINE_STATUS.lock().await.clone();
                 if engine_status != previous_engine_status {

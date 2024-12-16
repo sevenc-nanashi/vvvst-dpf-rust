@@ -51,11 +51,17 @@ function(copy_assets_to_target TARGET_NAME)
   else()
     set(VVVST_IMPL_NAME "libvvvst_impl.so")
   endif()
+  if(MSVC)
+    set(ENGINE_MANAGER_NAME "engine-manager.exe")
+  else()
+    set(ENGINE_MANAGER_NAME "engine-manager")
+  endif()
   add_custom_command(
     TARGET ${TARGET_NAME}
     PRE_BUILD
-    COMMAND ${CMAKE_COMMAND} -E echo
-            "Copying ${VVVST_IMPL_NAME} to $<TARGET_FILE_DIR:${TARGET_NAME}>"
+    COMMAND
+      ${CMAKE_COMMAND} -E echo
+      "Copying ${VVVST_IMPL_NAME}, ${ENGINE_MANAGER_NAME} to $<TARGET_FILE_DIR:${TARGET_NAME}>"
     COMMAND_EXPAND_LISTS)
   add_custom_command(
     TARGET ${TARGET_NAME}
@@ -63,6 +69,14 @@ function(copy_assets_to_target TARGET_NAME)
     COMMAND
       ${CMAKE_COMMAND} -E copy_if_different
       ${CMAKE_CURRENT_SOURCE_DIR}/target/${RUST_PROFILE}/${VVVST_IMPL_NAME}
+      $<TARGET_FILE_DIR:${TARGET_NAME}>
+    COMMAND_EXPAND_LISTS)
+  add_custom_command(
+    TARGET ${TARGET_NAME}
+    PRE_BUILD
+    COMMAND
+      ${CMAKE_COMMAND} -E copy_if_different
+      ${CMAKE_CURRENT_SOURCE_DIR}/target/${RUST_PROFILE}/${ENGINE_MANAGER_NAME}
       $<TARGET_FILE_DIR:${TARGET_NAME}>
     COMMAND_EXPAND_LISTS)
 endfunction()

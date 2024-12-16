@@ -36,7 +36,6 @@ pub async fn unpack<T: DeserializeOwned>(
 pub enum ToManagerMessage {
     Hello,
     Ping,
-    Exit,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,7 +43,6 @@ pub enum ToClientMessage {
     Hello,
     Pong,
     EngineStatus(EngineStatus),
-    Error(String),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]

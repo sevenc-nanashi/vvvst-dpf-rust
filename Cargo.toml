@@ -31,7 +31,7 @@ serde_json = "1.0.128"
 tempfile = "3.13.0"
 tokio = { version = "1.40.0", features = ["io-util", "rt", "rt-multi-thread", "fs", "macros", "sync", "net", "signal", "process", "time"] }
 tracing = { version = "0.1.40", features = ["log"] }
-tracing-subscriber = "0.3.18"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 wav_io = "0.1.14"
 winit = "0.30.5"
 wry = "0.46.3"

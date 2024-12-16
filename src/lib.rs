@@ -1,4 +1,5 @@
 mod common;
+mod manager;
 mod model;
 mod plugin;
 mod saturating_ext;
