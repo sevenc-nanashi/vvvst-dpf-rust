@@ -107,6 +107,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: "recursive"
+      - name: Determine Information
+        id: determine-information
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            let version = github.ref_name;
+            if (!version) {
+              version = "255.255.255";
+            }
+            core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.vst3.zip`);
+            core.setOutput('au_name', `VVVST-${version}-${{ matrix.name }}.au.zip`);
       - name: Setup Rust
         run: rustup toolchain install stable --profile minimal
 
@@ -118,21 +130,6 @@ jobs:
           name: resource-editor
           path: resources/editor
 
-      - name: Determine Information
-        id: determine-information
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            let version = github.ref_name;
-            if (!version) {
-              version = "255.255.255";
-            }
-            core.setOutput('ref_name', version);
-            core.setOutput('prerelease', version === "255.255.255" || version.includes("-"));
-            core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.vst3.zip`);
-            core.setOutput('au_name', `VVVST-${version}-${{ matrix.name }}.au.zip`);
-            require('fs').writeFileSync('version.txt', version);
 
       - name: Install dependencies (macOS)
         if: matrix.os == 'macos-latest'
@@ -171,6 +168,11 @@ jobs:
           7z a -tzip ${{ steps.determine-information.outputs.au_name }} vvvst.component
           cp ${{ steps.determine-information.outputs.au_name }} ../../../
 
+      - name: Build installer (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cargo xtask generate-installer
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
@@ -178,18 +180,7 @@ jobs:
           path: |
             ${{ steps.determine-information.outputs.zip_name }}
             ${{ steps.determine-information.outputs.au_name }}
-
-      - name: Build installer
-        if: matrix.os == 'windows-latest'
-        run: |
-          cargo xtask generate-installer
-
-      - name: Upload installer
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-${{ matrix.name }}-installer
-          path: build/VVVST-*-windows-setup.exe
+            build/VVVST-*-windows-setup.exe
 
   release:
     needs:
@@ -203,6 +194,19 @@ jobs:
           path: build
           merge-multiple: true
           pattern: build-*
+
+      - name: Determine Information
+        id: determine-information
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            let version = github.ref_name;
+            if (!version) {
+              version = "255.255.255";
+            }
+            core.setOutput('ref_name', version);
+            core.setOutput('prerelease', version === "255.255.255" || version.includes("-"));
 
       - name: Upload
         uses: softprops/action-gh-release@v2
