@@ -79,6 +79,16 @@ function(copy_assets_to_target TARGET_NAME)
       ${CMAKE_CURRENT_SOURCE_DIR}/target/${RUST_PROFILE}/${ENGINE_MANAGER_NAME}
       $<TARGET_FILE_DIR:${TARGET_NAME}>
     COMMAND_EXPAND_LISTS)
+  if(MSVC)
+    add_custom_command(
+      TARGET ${TARGET_NAME}
+      PRE_BUILD
+      COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/target/${RUST_PROFILE}/vvvst_impl.pdb
+        $<TARGET_FILE_DIR:${TARGET_NAME}>
+      COMMAND_EXPAND_LISTS)
+  endif()
 endfunction()
 
 copy_assets_to_target(${VVVST_NAME}-vst3)

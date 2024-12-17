@@ -26,6 +26,7 @@ pub enum RequestInner {
     GetProjectName,
 
     GetConfig,
+    SetConfig(String),
 
     GetProject,
     SetProject(String),
@@ -47,6 +48,8 @@ pub enum RequestInner {
     ExportProject,
 
     GetCurrentPosition,
+
+    RestartEngine,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

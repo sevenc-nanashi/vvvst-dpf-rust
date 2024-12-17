@@ -2,16 +2,20 @@
 //! TCP通信でVSTインスタンスとのやり取りを行い、エンジンのArc的なものを提供する。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod manager;
 mod common;
+mod manager;
 
 use crate::manager::EngineStatus;
-use std::sync::{Arc, LazyLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
 
 use anyhow::{Context, Result};
 use fs4::fs_err3_tokio::AsyncFileExt;
 use manager::pack;
 use serde::{Deserialize, Serialize};
+use tap::prelude::*;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
@@ -30,6 +34,29 @@ struct Store {
 struct CurrentConnections {
     num: u32,
     last_connection: std::time::Instant,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PartialConfig {
+    engine_settings: HashMap<uuid::Uuid, PartialEngineSettings>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PartialEngineSettings {
+    use_gpu: bool,
+}
+impl Default for PartialEngineSettings {
+    fn default() -> Self {
+        Self { use_gpu: false }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PartialEngineManifest {
+    uuid: uuid::Uuid,
 }
 
 fn manager_path() -> std::path::PathBuf {
@@ -56,7 +83,8 @@ fn voicevox_engine_path() -> std::path::PathBuf {
     }
 }
 
-async fn get_random_port() -> Result<u16> {
+#[cached::proc_macro::once(result)]
+async fn get_engine_port() -> Result<u16> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
     Ok(port)
@@ -64,6 +92,8 @@ async fn get_random_port() -> Result<u16> {
 
 static ENGINE_STATUS: LazyLock<Arc<Mutex<EngineStatus>>> =
     LazyLock::new(|| Arc::new(Mutex::new(EngineStatus::NotRunning)));
+static ENGINE_PROCESS: LazyLock<Arc<Mutex<Option<tokio::process::Child>>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(None)));
 static CURRENT_CONNECTIONS: LazyLock<tokio::sync::Mutex<CurrentConnections>> =
     LazyLock::new(|| {
         tokio::sync::Mutex::new(CurrentConnections {
@@ -71,12 +101,16 @@ static CURRENT_CONNECTIONS: LazyLock<tokio::sync::Mutex<CurrentConnections>> =
             last_connection: std::time::Instant::now(),
         })
     });
-
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_max_level(if cfg!(debug_assertions) {
+            tracing::Level::DEBUG
+        } else {
+            tracing::Level::INFO
+        })
+        .with_ansi(false)
         .init();
     let lock_path = manager_path().join("lock");
     let state_path = manager_path().join("state");
@@ -103,85 +137,21 @@ async fn main() -> Result<()> {
             manager_port: server.local_addr()?.port(),
             process_id: std::process::id(),
         };
-        tokio::fs::write(&state_path, bincode::serialize(&state)?).await?;
+        fs_err::tokio::write(&state_path, bincode::serialize(&state)?).await?;
         println!("{}", state.manager_port);
-        let mut store: Store = if tokio::fs::metadata(&store_path).await.is_ok() {
-            bincode::deserialize(&tokio::fs::read(&store_path).await?)?
-        } else {
-            Store::default()
-        };
-        if !store.engine_path.exists() {
+        let mut store = load_store().await?;
+
+        if fs_err::tokio::metadata(&store.engine_path).await.is_err() {
             let engine_path = voicevox_engine_path();
-            if engine_path.exists() {
-                tokio::fs::write(&store_path, bincode::serialize(&Store { engine_path })?).await?;
-            } else {
-                let engine_path = if cfg!(target_os = "linux") {
-                    loop {
-                        let appimage_or_run = rfd::AsyncFileDialog::new()
-                            .pick_file()
-                            .await
-                            .context("failed to pick engine file")?;
-                        let appimage_or_run = appimage_or_run.path().to_path_buf();
-                        if appimage_or_run.extension().unwrap() == "AppImage"
-                            || appimage_or_run.file_name() == Some(std::ffi::OsStr::new("run"))
-                        {
-                            break appimage_or_run;
-                        }
-                        rfd::AsyncMessageDialog::new()
-                        .set_title("エンジンまたはAppImageが見つかりません")
-                        .set_description(
-                            "エンジンまたはAppImageが見つかりませんでした。VOICEVOXのAppImageまたはrunファイルを選択し直してください。",
-                        )
-                        .set_buttons(rfd::MessageButtons::Ok)
-                        .show()
-                        .await;
-                    }
-                } else {
-                    loop {
-                        let voicevox_dir = rfd::AsyncFileDialog::new()
-                            .set_title("VOICEVOXのフォルダを選択してください")
-                            .pick_folder()
-                            .await
-                            .context("failed to pick engine file")?
-                            .path()
-                            .to_path_buf();
-                        let run_name = if cfg!(target_os = "windows") {
-                            "run.exe"
-                        } else {
-                            "run"
-                        };
-                        if voicevox_dir.join("vv-engine").join(run_name).exists() {
-                            break voicevox_dir.join("vv-engine").join(run_name);
-                        }
-                        rfd::AsyncMessageDialog::new()
-                            .set_title("エンジンが見つかりません")
-                            .set_description(
-                                "エンジンが見つかりませんでした。VOICEVOXのフォルダを選択し直してください。",
-                            )
-                            .set_buttons(rfd::MessageButtons::Ok)
-                            .show()
-                            .await;
-                    }
-                };
-
+            if fs_err::tokio::metadata(&engine_path).await.is_ok() {
                 store.engine_path = engine_path;
-                tokio::fs::write(&store_path, bincode::serialize(&store)?).await?;
+            } else {
+                let engine_path = ask_engine_path().await?;
+                store.engine_path = engine_path;
             }
+            save_store(&store).await?;
         }
 
-        let engine_path = store.engine_path;
-        let random_port = get_random_port().await?;
-        {
-            let engine_status = EngineStatus::Running { port: random_port };
-            let mut engine_status_lock = ENGINE_STATUS.lock().await;
-            *engine_status_lock = engine_status;
-        }
-        let mut engine_process = tokio::process::Command::new(engine_path)
-            .arg("--port")
-            .arg(random_port.to_string())
-            .stdout(std::io::stderr())
-            .stderr(std::io::stderr())
-            .spawn()?;
         let no_connections = async {
             loop {
                 let current_connections = CURRENT_CONNECTIONS.lock().await;
@@ -193,36 +163,75 @@ async fn main() -> Result<()> {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
         };
-        tokio::select! {
+
+        tokio::spawn(async {
+            let start_result = start_engine().await;
+            if let Err(e) = start_result {
+                error!("failed to start engine: {:?}", e);
+            }
+
+            let mut prev_status: Option<std::process::ExitStatus> = None;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let mut engine_process_lock = ENGINE_PROCESS.lock().await;
+                let status = if let Some(engine_process) = engine_process_lock.as_mut() {
+                    engine_process.try_wait().ok().flatten()
+                } else {
+                    None
+                };
+                if status != prev_status {
+                    info!("engine status changed: {:?} -> {:?}", prev_status, status);
+                    if let Some(status) = status {
+                        if !status.success() {
+                            rfd::AsyncMessageDialog::new()
+                                .set_title("音声合成エンジンエラー")
+                                .set_description("音声合成エンジンが異常終了しました。エンジンを再起動してください。")
+                                .set_buttons(rfd::MessageButtons::Ok)
+                                .set_level(rfd::MessageLevel::Error)
+                                .show()
+                                .await;
+                        }
+                    }
+                }
+                prev_status = status;
+            }
+        });
+
+        let result = tokio::select! {
             result = run_server(server) => {
-                result?;
+                result
             }
             _ = no_connections => {
                 info!("no connections for 10 seconds");
-            }
-            _ = engine_process.wait() => {
-                let mut engine_status = ENGINE_STATUS.lock().await;
-                *engine_status = EngineStatus::Dead;
-                info!("engine process exited");
+                Ok(())
             }
             _ = tokio::signal::ctrl_c() => {
                 info!("ctrl-c received");
+                Ok(())
             }
         };
-        if engine_process.try_wait()?.is_none() {
-            info!("killing engine process");
-            engine_process.kill().await?;
+
+        {
+            let mut engine_process_lock = ENGINE_PROCESS.lock().await;
+            if let Some(mut engine_process) = engine_process_lock.take() {
+                if engine_process.try_wait()?.is_none() {
+                    info!("killing engine process");
+                    engine_process.kill().await?;
+                }
+            }
         }
         lock_file.unlock()?;
         drop(lock_file);
         std::fs::remove_file(&lock_path)?;
+
+        result?;
     } else {
         // ロック失敗時 = 他のプロセスが起動している時。
         // stateが書き込まれるまで待つ
         info!("lock failed: waiting for state file");
         let mut state: Option<State> = None;
         for _ in 0..10 {
-            if tokio::fs::metadata(&state_path).await.is_ok() {
+            if fs_err::tokio::metadata(&state_path).await.is_ok() {
                 state = Some(bincode::deserialize(&std::fs::read(&state_path)?)?);
                 break;
             }
@@ -287,18 +296,23 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
                         {
                             break Err(e);
                         }
+                        info!("Hello sent");
                     }
                     manager::ToManagerMessage::Ping => {
-                        info!("Ping received");
                         let mut writer_inner = writer.lock().await;
                         if let Err(e) =
                             pack(manager::ToClientMessage::Pong, &mut *writer_inner).await
                         {
                             break Err(e);
                         }
+                        drop(writer_inner);
 
                         let mut last_ping_inner = last_ping.lock().await;
                         *last_ping_inner = std::time::Instant::now();
+                    }
+                    manager::ToManagerMessage::Restart => {
+                        info!("Restart received");
+                        start_engine().await?;
                     }
                 }
             }
@@ -315,17 +329,17 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
                 let engine_status = ENGINE_STATUS.lock().await.clone();
                 if engine_status != previous_engine_status {
                     info!("Engine status changed: {:?}", engine_status);
-                    let mut writer_inner = writer.lock().await;
-                    if let Err(e) = pack(
-                        manager::ToClientMessage::EngineStatus(engine_status),
-                        &mut *writer_inner,
-                    )
-                    .await
-                    {
-                        break Err(e);
-                    }
-                    if engine_status == EngineStatus::Dead {
-                        break Ok(());
+                    if let EngineStatus::Running { port } = engine_status {
+                        info!("Sending EnginePort: {}", port);
+                        let mut writer_inner = writer.lock().await;
+                        if let Err(e) = pack(
+                            manager::ToClientMessage::EnginePort(port),
+                            &mut *writer_inner,
+                        )
+                        .await
+                        {
+                            break Err(e);
+                        }
                     }
                     previous_engine_status = engine_status;
                 }
@@ -362,6 +376,128 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
         current_connections.num -= 1;
     }
     result?;
+
+    Ok(())
+}
+
+async fn load_store() -> Result<Store> {
+    let store_path = manager_path().join("store");
+    if store_path.exists() {
+        let store = bincode::deserialize(&fs_err::tokio::read(&store_path).await?)?;
+        Ok(store)
+    } else {
+        Ok(Store::default())
+    }
+}
+
+async fn save_store(store: &Store) -> Result<()> {
+    let store_path = manager_path().join("store");
+    fs_err::tokio::write(&store_path, bincode::serialize(store)?).await?;
+    Ok(())
+}
+
+async fn ask_engine_path() -> Result<std::path::PathBuf> {
+    let engine_path = if cfg!(target_os = "linux") {
+        loop {
+            let appimage_or_run = rfd::AsyncFileDialog::new()
+                .pick_file()
+                .await
+                .context("failed to pick engine file")?;
+            let appimage_or_run = appimage_or_run.path().to_path_buf();
+            rfd::AsyncMessageDialog::new()
+                .set_title("エンジンまたはAppImageが見つかりません")
+                .set_description(
+                    "エンジンまたはAppImageが見つかりませんでした。VOICEVOXのAppImageまたはrunを選択し直してください。",
+                )
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show()
+                .await;
+            if appimage_or_run.extension().unwrap() == "AppImage"
+                || appimage_or_run.file_name() == Some(std::ffi::OsStr::new("run"))
+            {
+                break appimage_or_run;
+            }
+        }
+    } else {
+        loop {
+            let voicevox_dir = rfd::AsyncFileDialog::new()
+                .set_title("VOICEVOXのフォルダを選択してください")
+                .pick_folder()
+                .await
+                .context("failed to pick engine file")?
+                .path()
+                .to_path_buf();
+            let run_name = if cfg!(target_os = "windows") {
+                "run.exe"
+            } else {
+                "run"
+            };
+            if voicevox_dir.join("vv-engine").join(run_name).exists() {
+                break voicevox_dir.join("vv-engine").join(run_name);
+            }
+            rfd::AsyncMessageDialog::new()
+                .set_title("エンジンが見つかりません")
+                .set_description(
+                    "エンジンが見つかりませんでした。VOICEVOXのフォルダを選択し直してください。",
+                )
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show()
+                .await;
+        }
+    };
+
+    Ok(engine_path)
+}
+
+#[tracing::instrument(skip_all)]
+async fn start_engine() -> Result<()> {
+    info!("starting engine");
+    let port = get_engine_port().await?;
+    let store = load_store().await?;
+    let engine_path = store.engine_path;
+    let engine_uuid = serde_json::from_slice::<PartialEngineManifest>(
+        &fs_err::tokio::read(engine_path.parent().unwrap().join("engine_manifest.json")).await?,
+    )?
+    .uuid;
+    let engine_settings = serde_json::from_slice::<PartialConfig>(
+        &fs_err::tokio::read(common::config_path().await).await?,
+    )?
+    .engine_settings
+    .get(&engine_uuid)
+    .cloned()
+    .unwrap_or_default();
+    let use_gpu = engine_settings.use_gpu;
+    info!("engine_path: {:?}", engine_path);
+    info!("port: {}", port);
+    info!("use_gpu: {}", use_gpu);
+
+    {
+        let mut engine_process_lock = ENGINE_PROCESS.lock().await;
+        if let Some(mut engine_process) = engine_process_lock.take() {
+            if engine_process.try_wait()?.is_none() {
+                info!("killing previous engine process");
+                engine_process.kill().await?;
+            }
+        }
+    }
+    {
+        let engine_status = EngineStatus::Running { port };
+        let mut engine_status_lock = ENGINE_STATUS.lock().await;
+        *engine_status_lock = engine_status;
+    }
+    let engine_process = tokio::process::Command::new(engine_path)
+        .arg("--port")
+        .arg(port.to_string())
+        .pipe(|cmd| if use_gpu { cmd.arg("--use_gpu") } else { cmd })
+        .tap(|cmd| info!("starting engine: {:?}", cmd))
+        .stdout(std::io::stderr())
+        .stderr(std::io::stderr())
+        .spawn()?;
+    {
+        let mut engine_process_lock = ENGINE_PROCESS.lock().await;
+        *engine_process_lock = Some(engine_process);
+    }
+    info!("engine started");
 
     Ok(())
 }

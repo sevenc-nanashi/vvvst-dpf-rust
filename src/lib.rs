@@ -4,11 +4,12 @@ mod model;
 mod plugin;
 mod saturating_ext;
 mod ui;
+mod vst_common;
 
-use common::NUM_CHANNELS;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
+use vst_common::NUM_CHANNELS;
 
 pub struct Plugin {
     inner: Arc<Mutex<plugin::PluginImpl>>,

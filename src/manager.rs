@@ -36,18 +36,18 @@ pub async fn unpack<T: DeserializeOwned>(
 pub enum ToManagerMessage {
     Hello,
     Ping,
+    Restart,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ToClientMessage {
     Hello,
     Pong,
-    EngineStatus(EngineStatus),
+    EnginePort(u16),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum EngineStatus {
     NotRunning,
     Running { port: u16 },
-    Dead,
 }
