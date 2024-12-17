@@ -43,7 +43,7 @@ target_include_directories(${VVVST_NAME} PUBLIC "src" "deps"
 target_compile_features(${VVVST_NAME} PUBLIC cxx_std_20)
 
 # https://qiita.com/canary_llama/items/d63f5007161cf4a2c4b3
-function(copy_dlls_to_target TARGET_NAME)
+function(copy_assets_to_target TARGET_NAME)
   if(MSVC)
     set(VVVST_IMPL_NAME "vvvst_impl.dll")
   elseif(APPLE)
@@ -51,11 +51,17 @@ function(copy_dlls_to_target TARGET_NAME)
   else()
     set(VVVST_IMPL_NAME "libvvvst_impl.so")
   endif()
+  if(MSVC)
+    set(ENGINE_MANAGER_NAME "engine-manager.exe")
+  else()
+    set(ENGINE_MANAGER_NAME "engine-manager")
+  endif()
   add_custom_command(
     TARGET ${TARGET_NAME}
     PRE_BUILD
-    COMMAND ${CMAKE_COMMAND} -E echo
-            "Copying ${VVVST_IMPL_NAME} to $<TARGET_FILE_DIR:${TARGET_NAME}>"
+    COMMAND
+      ${CMAKE_COMMAND} -E echo
+      "Copying ${VVVST_IMPL_NAME}, ${ENGINE_MANAGER_NAME} to $<TARGET_FILE_DIR:${TARGET_NAME}>"
     COMMAND_EXPAND_LISTS)
   add_custom_command(
     TARGET ${TARGET_NAME}
@@ -65,11 +71,29 @@ function(copy_dlls_to_target TARGET_NAME)
       ${CMAKE_CURRENT_SOURCE_DIR}/target/${RUST_PROFILE}/${VVVST_IMPL_NAME}
       $<TARGET_FILE_DIR:${TARGET_NAME}>
     COMMAND_EXPAND_LISTS)
+  add_custom_command(
+    TARGET ${TARGET_NAME}
+    PRE_BUILD
+    COMMAND
+      ${CMAKE_COMMAND} -E copy_if_different
+      ${CMAKE_CURRENT_SOURCE_DIR}/target/${RUST_PROFILE}/${ENGINE_MANAGER_NAME}
+      $<TARGET_FILE_DIR:${TARGET_NAME}>
+    COMMAND_EXPAND_LISTS)
+  if(MSVC)
+    add_custom_command(
+      TARGET ${TARGET_NAME}
+      PRE_BUILD
+      COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/target/${RUST_PROFILE}/vvvst_impl.pdb
+        $<TARGET_FILE_DIR:${TARGET_NAME}>
+      COMMAND_EXPAND_LISTS)
+  endif()
 endfunction()
 
-copy_dlls_to_target(${VVVST_NAME}-vst3)
+copy_assets_to_target(${VVVST_NAME}-vst3)
 if(TARGET ${VVVST_NAME}-au)
   # DPFがビルド時に-exportを実行するので、それが落ちないようにコピー対象に含める
-  copy_dlls_to_target(${VVVST_NAME}-export)
-  copy_dlls_to_target(${VVVST_NAME}-au)
+  copy_assets_to_target(${VVVST_NAME}-export)
+  copy_assets_to_target(${VVVST_NAME}-au)
 endif()
