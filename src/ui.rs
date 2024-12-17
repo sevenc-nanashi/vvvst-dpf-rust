@@ -1,4 +1,9 @@
-use crate::{common::RUNTIME, manager, model::*, plugin::PluginImpl};
+use crate::{
+    common::{self, RUNTIME},
+    manager,
+    model::*,
+    plugin::PluginImpl,
+};
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -10,6 +15,7 @@ use std::{
     ptr::NonNull,
     sync::Arc,
 };
+use tap::prelude::*;
 use tokio::{
     io::AsyncBufReadExt,
     sync::{
@@ -19,11 +25,12 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 
+// https://stackoverflow.com/a/75292572
+const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
+
 static EDITOR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/resources/editor");
 pub struct PluginUiImpl {
     webview: Arc<wry::WebView>,
-
-    _data_dir: tempfile::TempDir,
 
     notification_receiver: UnboundedReceiver<UiNotification>,
     response_receiver: UnboundedReceiver<Response>,
@@ -89,6 +96,13 @@ impl PluginUiImpl {
                 .arg(handle.to_string())
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
+                .pipe(|cmd| {
+                    if cfg!(target_os = "windows") {
+                        cmd.creation_flags(WINDOWS_CREATE_NO_WINDOW)
+                    } else {
+                        cmd
+                    }
+                })
                 .spawn()
                 .unwrap();
             info!("engine-manager started: {:?}", manager_process);
@@ -168,8 +182,7 @@ impl PluginUiImpl {
 
         let plugin_ref = Arc::clone(&plugin);
 
-        let temp_dir = tempfile::TempDir::new()?;
-        let mut web_context = wry::WebContext::new(Some(temp_dir.path().to_path_buf()));
+        let mut web_context = wry::WebContext::new(Some(common::data_dir().join("webview_cache")));
         let webview_builder = wry::WebViewBuilder::with_web_context(&mut web_context)
             .with_bounds(wry::Rect {
                 position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
@@ -268,8 +281,6 @@ impl PluginUiImpl {
 
         Ok(PluginUiImpl {
             webview,
-
-            _data_dir: temp_dir,
 
             stop_sender,
             notification_receiver,

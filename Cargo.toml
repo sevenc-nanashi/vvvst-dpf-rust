@@ -28,6 +28,7 @@ rfd = "0.15.0"
 serde = { version = "1.0.210", features = ["derive"] }
 serde_bytes = "0.11.15"
 serde_json = "1.0.128"
+tap = "1.0.1"
 tempfile = "3.13.0"
 tokio = { version = "1.40.0", features = ["io-util", "rt", "rt-multi-thread", "fs", "macros", "sync", "net", "signal", "process", "time"] }
 tracing = { version = "0.1.40", features = ["log"] }

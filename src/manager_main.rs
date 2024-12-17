@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod manager;
+mod common;
 
 use crate::manager::EngineStatus;
 use std::sync::{Arc, LazyLock};
@@ -32,9 +33,7 @@ struct CurrentConnections {
 }
 
 fn manager_path() -> std::path::PathBuf {
-    dirs::config_dir()
-        .unwrap()
-        .join("voicevox_vst_engine_manager")
+    common::data_dir().join("engine_manager")
 }
 
 fn voicevox_engine_path() -> std::path::PathBuf {

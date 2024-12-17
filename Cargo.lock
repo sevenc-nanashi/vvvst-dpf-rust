@@ -4027,6 +4027,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tap"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
 name = "target-lexicon"
 version = "0.12.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4497,6 +4503,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "tap",
  "tempfile",
  "tokio",
  "tracing",
