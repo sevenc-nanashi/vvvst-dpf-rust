@@ -99,11 +99,9 @@ impl PluginUiImpl {
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .pipe(|cmd| {
-                    if cfg!(target_os = "windows") {
-                        cmd.creation_flags(WINDOWS_CREATE_NO_WINDOW)
-                    } else {
+                    #[cfg(target_os = "windows")]
+                    let cmd = cmd.creation_flags(WINDOWS_CREATE_NO_WINDOW);
                         cmd
-                    }
                 })
                 .spawn()
                 .unwrap();
