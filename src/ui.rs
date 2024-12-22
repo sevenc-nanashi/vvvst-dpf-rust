@@ -101,7 +101,7 @@ impl PluginUiImpl {
                 .pipe(|cmd| {
                     #[cfg(target_os = "windows")]
                     let cmd = cmd.creation_flags(WINDOWS_CREATE_NO_WINDOW);
-                        cmd
+                    cmd
                 })
                 .spawn()
                 .unwrap();

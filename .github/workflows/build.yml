@@ -2,6 +2,11 @@ name: "Build"
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version"
+        required: true
+        default: "255.255.255"
 
   push:
   pull_request:
@@ -11,6 +16,26 @@ defaults:
     shell: bash
 
 jobs:
+  config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine Information
+        id: determine-information
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            let version = github.ref_name || github.event.inputs.version || "255.255.255";
+            core.setOutput('ref_name', version);
+            core.setOutput('prerelease', version === "255.255.255" || version.includes("-"));
+            core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.vst3.zip`);
+            core.setOutput('au_name', `VVVST-${version}-${{ matrix.name }}.au.zip`);
+    outputs:
+      ref_name: ${{ steps.determine-information.outputs.ref_name }}
+      prerelease: ${{ steps.determine-information.outputs.prerelease }}
+      zip_name: ${{ steps.determine-information.outputs.zip_name }}
+      au_name: ${{ steps.determine-information.outputs.au_name }}
+
   build-editor:
     runs-on: ubuntu-latest
     outputs:
@@ -86,6 +111,7 @@ jobs:
 
   build-each:
     needs:
+      - config
       - build-editor
     strategy:
       fail-fast: false
@@ -118,22 +144,6 @@ jobs:
           name: resource-editor
           path: resources/editor
 
-      - name: Determine Information
-        id: determine-information
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            let version = github.ref_name;
-            if (!version) {
-              version = "255.255.255";
-            }
-            core.setOutput('ref_name', version);
-            core.setOutput('prerelease', version === "255.255.255" || version.includes("-"));
-            core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.vst3.zip`);
-            core.setOutput('au_name', `VVVST-${version}-${{ matrix.name }}.au.zip`);
-            require('fs').writeFileSync('version.txt', version);
-
       - name: Install dependencies (macOS)
         if: matrix.os == 'macos-latest'
         run: |
@@ -161,23 +171,23 @@ jobs:
       - name: Package
         run: |
           cd build/release/bin/
-          7z a -tzip ${{ steps.determine-information.outputs.zip_name }} vvvst.vst3
-          cp ${{ steps.determine-information.outputs.zip_name }} ../../../
+          7z a -tzip ${{ needs.config.outputs.zip_name }} vvvst.vst3
+          cp ${{ needs.config.outputs.zip_name }} ../../../
 
       - name: Package AU
         if: matrix.os == 'macos-latest'
         run: |
           cd build/release/bin/
-          7z a -tzip ${{ steps.determine-information.outputs.au_name }} vvvst.component
-          cp ${{ steps.determine-information.outputs.au_name }} ../../../
+          7z a -tzip ${{ needs.config.outputs.au_name }} vvvst.vst3
+          cp ${{ needs.config.outputs.au_name }} ../../../
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.name }}
           path: |
-            ${{ steps.determine-information.outputs.zip_name }}
-            ${{ steps.determine-information.outputs.au_name }}
+            ${{ needs.config.outputs.zip_name }}
+            ${{ needs.config.outputs.au_name }}
 
       - name: Build installer
         if: matrix.os == 'windows-latest'
@@ -193,6 +203,7 @@ jobs:
 
   release:
     needs:
+      - config
       - build-each
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
@@ -210,7 +221,7 @@ jobs:
           body: |
             Rust SHA: ${{ github.sha }}
             Editor SHA: https://github.com/sevenc-nanashi/voicevox/commit/${{ needs.build-editor.outputs.editor_sha }}
-          prerelease: ${{ steps.determine-information.outputs.prerelease }}
+          prerelease: ${{ needs.config.outputs.prerelease }}
           files: |
             build/*
-          tag_name: ${{ steps.determine-information.outputs.ref_name }}
+          tag_name: ${{ needs.config.outputs.ref_name }}
