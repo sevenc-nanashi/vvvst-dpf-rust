@@ -25,19 +25,30 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            let version = ${{ toJSON(github.ref_name) }} || ${{ toJSON(inputs.version) }} || "255.255.255";
-            core.setOutput('ref_name', version);
+            let version;
+            const refName = ${{ toJSON(github.ref_name) }};
+            if (${{ github.event_name == 'workflow_dispatch' }}) {
+              version = ${{ toJSON(inputs.version) }};
+            } else if (refName.startsWith("v")) {
+              version = refName.slice(1);
+            } else {
+              version = "255.255.255";
+            }
+            console.log(`version: ${version}`)
+            core.setOutput('version', version);
             core.setOutput('prerelease', version === "255.255.255" || version.includes("-"));
             core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.vst3.zip`);
             core.setOutput('au_name', `VVVST-${version}-${{ matrix.name }}.au.zip`);
     outputs:
-      ref_name: ${{ steps.determine-information.outputs.ref_name }}
+      version: ${{ steps.determine-information.outputs.version }}
       prerelease: ${{ steps.determine-information.outputs.prerelease }}
       zip_name: ${{ steps.determine-information.outputs.zip_name }}
       au_name: ${{ steps.determine-information.outputs.au_name }}
 
   build-editor:
     runs-on: ubuntu-latest
+    needs:
+      - config
     outputs:
       editor_sha: ${{ steps.emit-information.outputs.editor_sha }}
     steps:
@@ -95,6 +106,7 @@ jobs:
 
       - name: Build
         run: |
+          npm version ${{ needs.config.outputs.version }}
           npm run vst:build
 
       - name: Upload
@@ -138,6 +150,7 @@ jobs:
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
+
       - name: Download Editor
         uses: actions/download-artifact@v4
         with:
@@ -163,6 +176,11 @@ jobs:
 
           echo "CC=gcc-14" >> $GITHUB_ENV
           echo "CXX=g++-14" >> $GITHUB_ENV
+
+      - name: Set version
+        run:
+          cargo install cargo-edit
+          cargo set-version ${{ needs.config.outputs.version }}
 
       - name: Build
         run: |
@@ -224,4 +242,4 @@ jobs:
           prerelease: ${{ needs.config.outputs.prerelease }}
           files: |
             build/*
-          tag_name: ${{ needs.config.outputs.ref_name }}
+          tag_name: ${{ needs.config.outputs.version }}
