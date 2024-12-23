@@ -141,10 +141,12 @@ jobs:
       - name: Colorize
         run: |
           echo "CLICOLOR_FORCE=1" >> $GITHUB_ENV
+
       - name: Checkout VVVST
         uses: actions/checkout@v4
         with:
           submodules: "recursive"
+
       - name: Setup Rust
         run: rustup toolchain install stable --profile minimal
 
@@ -178,9 +180,14 @@ jobs:
           echo "CXX=g++-14" >> $GITHUB_ENV
 
       - name: Set version
-        run: |
-          cargo install cargo-edit
-          cargo set-version ${{ needs.config.outputs.version }} -p vvvst
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require("node:fs");
+            const version = ${{ toJSON(needs.config.outputs.version) }};
+            const cargoToml = fs.readFileSync("./Cargo.toml");
+            fs.writeFileSync("./Cargo.toml, cargoToml.replace("255.255.255", version);
 
       - name: Build
         run: |
