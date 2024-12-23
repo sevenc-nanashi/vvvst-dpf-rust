@@ -178,7 +178,7 @@ jobs:
           echo "CXX=g++-14" >> $GITHUB_ENV
 
       - name: Set version
-        run:
+        run: |
           cargo install cargo-edit
           cargo set-version ${{ needs.config.outputs.version }}
 
