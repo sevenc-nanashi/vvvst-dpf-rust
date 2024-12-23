@@ -187,7 +187,7 @@ jobs:
             const fs = require("node:fs");
             const version = ${{ toJSON(needs.config.outputs.version) }};
             const cargoToml = fs.readFileSync("./Cargo.toml");
-            fs.writeFileSync("./Cargo.toml, cargoToml.replace("255.255.255", version));
+            fs.writeFileSync("./Cargo.toml", cargoToml.replace("255.255.255", version));
 
       - name: Build
         run: |
