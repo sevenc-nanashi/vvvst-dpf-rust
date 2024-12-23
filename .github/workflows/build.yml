@@ -106,7 +106,7 @@ jobs:
 
       - name: Build
         run: |
-          npm version ${{ needs.config.outputs.version }}
+          npm version ${{ needs.config.outputs.version }} --no-git-tag-version
           npm run vst:build
 
       - name: Upload
