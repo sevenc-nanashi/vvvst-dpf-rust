@@ -180,7 +180,7 @@ jobs:
       - name: Set version
         run: |
           cargo install cargo-edit
-          cargo set-version ${{ needs.config.outputs.version }}
+          cargo set-version ${{ needs.config.outputs.version }} -p vvvst
 
       - name: Build
         run: |
