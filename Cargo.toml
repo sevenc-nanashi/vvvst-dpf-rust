@@ -26,6 +26,7 @@ mime_guess = "2.0.5"
 process_path = "0.1.4"
 raw-window-handle = "0.6.2"
 rfd = "0.15.0"
+semver = "1.0.24"
 serde = { version = "1.0.210", features = ["derive"] }
 serde_bytes = "0.11.15"
 serde_json = "1.0.128"

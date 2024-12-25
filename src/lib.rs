@@ -29,15 +29,12 @@ pub struct Version {
 #[no_mangle]
 unsafe extern "C-unwind" fn get_version() -> Version {
     let version = env!("CARGO_PKG_VERSION");
-    let version_split = version.split('.').collect::<Vec<_>>();
-    let major = version_split[0].parse::<u8>().unwrap();
-    let minor = version_split[1].parse::<u8>().unwrap();
-    let patch = version_split[2].parse::<u8>().unwrap();
+    let version = semver::Version::parse(version).unwrap();
 
     Version {
-        major,
-        minor,
-        patch,
+        major: version.major as _,
+        minor: version.minor as _,
+        patch: version.patch as _,
     }
 }
 
