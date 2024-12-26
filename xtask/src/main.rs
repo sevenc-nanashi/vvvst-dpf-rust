@@ -356,10 +356,7 @@ fn generate_licenses() {
             }
             License {
                 name: krate.name.to_string(),
-                version: format!(
-                    "{}.{}.{}",
-                    krate.version.major, krate.version.minor, krate.version.patch
-                ),
+                version: krate.version.to_string(),
                 license,
                 text: license_text,
             }
@@ -397,7 +394,8 @@ fn generate_installer() {
     let main_cargo_toml = main_crate.join("Cargo.toml");
     let main_cargo_toml = cargo_toml::Manifest::from_path(&main_cargo_toml).unwrap();
 
-    let version: String = main_cargo_toml.package.unwrap().version.unwrap();
+    let version = main_cargo_toml.package.unwrap().version.unwrap();
+    let version = semver::Version::parse(&version).unwrap();
 
     let installer_base = main_crate
         .join("resources")
@@ -408,7 +406,10 @@ fn generate_installer() {
     let installer_base = std::fs::read_to_string(&installer_base).unwrap();
     std::fs::write(
         &installer_dist,
-        installer_base.replace("{version}", &version),
+        installer_base.replace(
+            "{version}",
+            format!("{}.{}.{}", version.major, version.minor, version.patch).as_str(),
+        ),
     )
     .unwrap();
     blue_log!("Building", "wrote nsis script to {:?}", installer_dist);
