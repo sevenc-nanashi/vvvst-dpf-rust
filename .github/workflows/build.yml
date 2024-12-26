@@ -37,6 +37,7 @@ jobs:
             console.log(`version: ${version}`)
             core.setOutput('version', version);
             core.setOutput('prerelease', version === "255.255.255" || version.includes("-"));
+
     outputs:
       version: ${{ steps.determine-information.outputs.version }}
       prerelease: ${{ steps.determine-information.outputs.prerelease }}
@@ -60,7 +61,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const version = ${{ needs.config.outputs.version }};
+            const version = ${{ toJSON(needs.config.outputs.version) }};
             console.log(`version: ${version}`)
             core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.vst3.zip`);
             core.setOutput('au_name', `VVVST-${version}-${{ matrix.name }}.au.zip`);
