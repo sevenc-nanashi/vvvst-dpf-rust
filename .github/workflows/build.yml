@@ -230,6 +230,7 @@ jobs:
     needs:
       - config
       - build-each
+      - build-editor
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     steps:
