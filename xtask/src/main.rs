@@ -356,7 +356,10 @@ fn generate_licenses() {
             }
             License {
                 name: krate.name.to_string(),
-                version: krate.version.to_string(),
+                version: format!(
+                    "{}.{}.{}",
+                    krate.version.major, krate.version.minor, krate.version.patch
+                ),
                 license,
                 text: license_text,
             }
