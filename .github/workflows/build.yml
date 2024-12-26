@@ -55,17 +55,6 @@ jobs:
           repository: "sevenc-nanashi/voicevox"
           ref: "add/vst"
 
-      - name: Determine information
-        id: determine-information
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const version = ${{ toJSON(needs.config.outputs.version) }};
-            console.log(`version: ${version}`)
-            core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.vst3.zip`);
-            core.setOutput('au_name', `VVVST-${version}-${{ matrix.name }}.au.zip`);
-
       - name: Checkout VVVST
         uses: actions/checkout@v4
         with:
@@ -149,6 +138,17 @@ jobs:
       - name: Colorize
         run: |
           echo "CLICOLOR_FORCE=1" >> $GITHUB_ENV
+
+      - name: Determine information
+        id: determine-information
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const version = ${{ toJSON(needs.config.outputs.version) }};
+            console.log(`version: ${version}`)
+            core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.vst3.zip`);
+            core.setOutput('au_name', `VVVST-${version}-${{ matrix.name }}.au.zip`);
 
       - name: Checkout VVVST
         uses: actions/checkout@v4
