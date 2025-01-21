@@ -2,6 +2,11 @@ name: "Build"
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version"
+        required: true
+        default: "255.255.255"
 
   push:
   pull_request:
@@ -113,7 +118,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            let version = github.ref_name;
+            let version = github.ref_name || ${{ toJSON(github.event.inputs.version) }};
             if (!version) {
               version = "255.255.255";
             }
@@ -201,7 +206,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            let version = github.ref_name;
+            let version = github.ref_name || ${{ github.event.inputs.version }};
             if (!version) {
               version = "255.255.255";
             }
