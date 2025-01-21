@@ -36,7 +36,7 @@ pub async fn unpack<T: DeserializeOwned>(
 pub enum ToManagerMessage {
     Hello,
     Ping,
-    Restart,
+    Start { use_gpu: bool, force_restart: bool },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

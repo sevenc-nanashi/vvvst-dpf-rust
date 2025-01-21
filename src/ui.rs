@@ -30,6 +30,7 @@ pub struct PluginUiImpl {
     notification_receiver: UnboundedReceiver<UiNotification>,
     response_receiver: UnboundedReceiver<Response>,
 
+    manager: tokio::task::JoinHandle<()>,
     manager_sender: UnboundedSender<ManagerMessage>,
 }
 
@@ -42,7 +43,7 @@ pub enum UiNotification {
 
 #[derive(Debug, Clone)]
 pub enum ManagerMessage {
-    Restart,
+    Start { use_gpu: bool, force_restart: bool },
     Stop,
 }
 
@@ -81,7 +82,7 @@ impl PluginUiImpl {
 
         let (manager_sender, mut manager_receiver) = tokio::sync::mpsc::unbounded_channel();
         let notification_sender = Arc::new(notification_sender);
-        RUNTIME.spawn(async move {
+        let manager = RUNTIME.spawn(async move {
             let manager_name = if cfg!(target_os = "windows") {
                 "engine-manager.exe"
             } else {
@@ -177,10 +178,19 @@ impl PluginUiImpl {
                             None => break Ok(()),
                         };
                         match message {
-                            ManagerMessage::Restart => {
+                            ManagerMessage::Start {
+                                use_gpu,
+                                force_restart,
+                            } => {
                                 let writer = &mut *writer.lock().await;
-                                if let Err(err) =
-                                    manager::pack(manager::ToManagerMessage::Restart, writer).await
+                                if let Err(err) = manager::pack(
+                                    manager::ToManagerMessage::Start {
+                                        use_gpu,
+                                        force_restart,
+                                    },
+                                    writer,
+                                )
+                                .await
                                 {
                                     error!("failed to send restart message: {}", err);
                                     break Err(err);
@@ -324,6 +334,7 @@ impl PluginUiImpl {
         Ok(PluginUiImpl {
             webview,
 
+            manager,
             manager_sender,
             notification_receiver,
             response_receiver,
@@ -386,12 +397,17 @@ impl PluginUiImpl {
             RequestInner::GetVersion => Ok(serde_json::to_value(env!("CARGO_PKG_VERSION"))?),
             RequestInner::GetProjectName => Ok(serde_json::to_value("VVVST")?),
             RequestInner::GetConfig => {
-                let config = tokio::fs::read_to_string(common::config_path().await).await?;
+                let config = tokio::fs::read_to_string(if editor_config_path().exists() {
+                    editor_config_path()
+                } else {
+                    original_config_path()
+                })
+                .await?;
 
                 Ok(serde_json::to_value(config)?)
             }
             RequestInner::SetConfig(config) => {
-                let config_path = common::editor_config_path();
+                let config_path = editor_config_path();
                 tokio::fs::write(&config_path, config).await?;
                 Ok(serde_json::Value::Null)
             }
@@ -536,18 +552,48 @@ impl PluginUiImpl {
                     Ok(serde_json::Value::Null)
                 }
             }
-            RequestInner::RestartEngine => {
-                let _ = manager_sender.send(ManagerMessage::Restart);
+            RequestInner::StartEngine {
+                use_gpu,
+                force_restart,
+            } => {
+                let _ = manager_sender.send(ManagerMessage::Start {
+                    use_gpu,
+                    force_restart,
+                });
                 Ok(serde_json::Value::Null)
             }
         }
     }
-}
 
-impl Drop for PluginUiImpl {
-    fn drop(&mut self) {
+    pub async fn terminate(self) -> Result<()> {
         if let Err(_) = self.manager_sender.send(ManagerMessage::Stop) {
             error!("failed to send stop signal");
         }
+
+        self.manager.await?;
+
+        Ok(())
+    }
+}
+
+/// Voicevox VSTのエディタの設定ファイルのパスを返す
+pub fn editor_config_path() -> std::path::PathBuf {
+    common::data_dir().join("config.json")
+}
+
+/// Voicevox本家のconfig.jsonのパスを返す
+pub fn original_config_path() -> std::path::PathBuf {
+    // Windows: %APPDATA%/voicevox/config.json
+    // macOS: ~/Library/Application Support/voicevox/config.json
+    // Linux: ~/.config/voicevox/config.json
+    if cfg!(target_os = "windows") {
+        let appdata = std::env::var("APPDATA").unwrap();
+        std::path::PathBuf::from(appdata).join("voicevox/config.json")
+    } else if cfg!(target_os = "macos") {
+        let home = std::env::var("HOME").unwrap();
+        std::path::PathBuf::from(home).join("Library/Application Support/voicevox/config.json")
+    } else {
+        let home = std::env::var("HOME").unwrap();
+        std::path::PathBuf::from(home).join(".config/voicevox/config.json")
     }
 }

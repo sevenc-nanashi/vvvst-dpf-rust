@@ -20,7 +20,12 @@ pub struct Request {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "type", content = "payload")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type",
+    content = "payload"
+)]
 pub enum RequestInner {
     GetVersion,
     GetProjectName,
@@ -49,7 +54,7 @@ pub enum RequestInner {
 
     GetCurrentPosition,
 
-    RestartEngine,
+    StartEngine { use_gpu: bool, force_restart: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

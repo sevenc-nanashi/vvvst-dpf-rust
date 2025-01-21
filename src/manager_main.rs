@@ -6,10 +6,7 @@ mod common;
 mod manager;
 
 use crate::manager::EngineStatus;
-use std::{
-    collections::HashMap,
-    sync::{Arc, LazyLock},
-};
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{Context, Result};
 use fs4::fs_err3_tokio::AsyncFileExt;
@@ -34,29 +31,6 @@ struct Store {
 struct CurrentConnections {
     num: u32,
     last_connection: std::time::Instant,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PartialConfig {
-    engine_settings: HashMap<uuid::Uuid, PartialEngineSettings>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PartialEngineSettings {
-    use_gpu: bool,
-}
-impl Default for PartialEngineSettings {
-    fn default() -> Self {
-        Self { use_gpu: false }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PartialEngineManifest {
-    uuid: uuid::Uuid,
 }
 
 fn manager_path() -> std::path::PathBuf {
@@ -90,8 +64,6 @@ async fn get_engine_port() -> Result<u16> {
     Ok(port)
 }
 
-static ENGINE_STATUS: LazyLock<Arc<Mutex<EngineStatus>>> =
-    LazyLock::new(|| Arc::new(Mutex::new(EngineStatus::NotRunning)));
 static ENGINE_PROCESS: LazyLock<Arc<Mutex<Option<tokio::process::Child>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
 static CURRENT_CONNECTIONS: LazyLock<tokio::sync::Mutex<CurrentConnections>> =
@@ -163,39 +135,6 @@ async fn main() -> Result<()> {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
         };
-
-        tokio::spawn(async {
-            let start_result = start_engine().await;
-            if let Err(e) = start_result {
-                error!("failed to start engine: {:?}", e);
-            }
-
-            let mut prev_status: Option<std::process::ExitStatus> = None;
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                let mut engine_process_lock = ENGINE_PROCESS.lock().await;
-                let status = if let Some(engine_process) = engine_process_lock.as_mut() {
-                    engine_process.try_wait().ok().flatten()
-                } else {
-                    None
-                };
-                if status != prev_status {
-                    info!("engine status changed: {:?} -> {:?}", prev_status, status);
-                    if let Some(status) = status {
-                        if !status.success() {
-                            rfd::AsyncMessageDialog::new()
-                                .set_title("音声合成エンジンエラー")
-                                .set_description("音声合成エンジンが異常終了しました。エンジンを再起動してください。")
-                                .set_buttons(rfd::MessageButtons::Ok)
-                                .set_level(rfd::MessageLevel::Error)
-                                .show()
-                                .await;
-                        }
-                    }
-                }
-                prev_status = status;
-            }
-        });
 
         let result = tokio::select! {
             result = run_server(server) => {
@@ -310,9 +249,12 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
                         let mut last_ping_inner = last_ping.lock().await;
                         *last_ping_inner = std::time::Instant::now();
                     }
-                    manager::ToManagerMessage::Restart => {
-                        info!("Restart received");
-                        start_engine().await?;
+                    manager::ToManagerMessage::Start {
+                        use_gpu,
+                        force_restart,
+                    } => {
+                        info!("Start received");
+                        start_engine(use_gpu, force_restart).await?;
                     }
                 }
             }
@@ -326,7 +268,19 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
             // 本来はcrossbeamとかを使うべきだが、エンジンの起動は長いのでポーリングによる実装でも
             // それほど問題にはならないと思われる。あとシンプルに面倒
             loop {
-                let engine_status = ENGINE_STATUS.lock().await.clone();
+                let engine_status = {
+                    if let Some(engine_process) = ENGINE_PROCESS.lock().await.as_mut() {
+                        if let Ok(Some(_)) = engine_process.try_wait() {
+                            EngineStatus::NotRunning
+                        } else {
+                            EngineStatus::Running {
+                                port: get_engine_port().await?,
+                            }
+                        }
+                    } else {
+                        EngineStatus::NotRunning
+                    }
+                };
                 if engine_status != previous_engine_status {
                     info!("Engine status changed: {:?}", engine_status);
                     if let EngineStatus::Running { port } = engine_status {
@@ -450,40 +404,29 @@ async fn ask_engine_path() -> Result<std::path::PathBuf> {
 }
 
 #[tracing::instrument(skip_all)]
-async fn start_engine() -> Result<()> {
+async fn start_engine(use_gpu: bool, force_restart: bool) -> Result<()> {
     info!("starting engine");
     let port = get_engine_port().await?;
     let store = load_store().await?;
     let engine_path = store.engine_path;
-    let engine_uuid = serde_json::from_slice::<PartialEngineManifest>(
-        &fs_err::tokio::read(engine_path.parent().unwrap().join("engine_manifest.json")).await?,
-    )?
-    .uuid;
-    let engine_settings = serde_json::from_slice::<PartialConfig>(
-        &fs_err::tokio::read(common::config_path().await).await?,
-    )?
-    .engine_settings
-    .get(&engine_uuid)
-    .cloned()
-    .unwrap_or_default();
-    let use_gpu = engine_settings.use_gpu;
     info!("engine_path: {:?}", engine_path);
     info!("port: {}", port);
     info!("use_gpu: {}", use_gpu);
+    info!("force_restart: {}", force_restart);
 
     {
         let mut engine_process_lock = ENGINE_PROCESS.lock().await;
-        if let Some(mut engine_process) = engine_process_lock.take() {
+        if let Some(engine_process) = engine_process_lock.as_mut() {
             if engine_process.try_wait()?.is_none() {
-                info!("killing previous engine process");
-                engine_process.kill().await?;
+                if force_restart {
+                    info!("killing previous engine process");
+                    engine_process.kill().await?;
+                } else {
+                    info!("engine already running");
+                    return Ok(());
+                }
             }
         }
-    }
-    {
-        let engine_status = EngineStatus::Running { port };
-        let mut engine_status_lock = ENGINE_STATUS.lock().await;
-        *engine_status_lock = engine_status;
     }
     let engine_process = tokio::process::Command::new(engine_path)
         .arg("--port")

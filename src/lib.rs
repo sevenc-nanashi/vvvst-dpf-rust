@@ -172,5 +172,17 @@ unsafe extern "C-unwind" fn plugin_ui_drop(plugin_ui: *mut PluginUi) {
     }
 
     let plugin_ui = Box::from_raw(plugin_ui);
-    drop(plugin_ui);
+    let plugin_ui = match Arc::try_unwrap(plugin_ui.inner) {
+        Ok(plugin_ui) => plugin_ui,
+        Err(_) => {
+            error!("Failed to drop PluginUi: still has references");
+            return;
+        }
+    };
+    let plugin_ui = plugin_ui.into_inner();
+
+    match vst_common::RUNTIME.block_on(plugin_ui.terminate()) {
+        Ok(_) => info!("PluginUi dropped"),
+        Err(e) => error!("Failed to drop PluginUi: {}", e),
+    }
 }
