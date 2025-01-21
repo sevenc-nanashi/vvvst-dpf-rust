@@ -177,6 +177,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: |
           cargo xtask generate-installer
+          cp ./build/VVVST-*-windows-setup.exe ./
 
       - name: Upload
         uses: actions/upload-artifact@v4
@@ -185,7 +186,7 @@ jobs:
           path: |
             ${{ steps.determine-information.outputs.zip_name }}
             ${{ steps.determine-information.outputs.au_name }}
-            build/VVVST-*-windows-setup.exe
+            VVVST-*-windows-setup.exe
 
   release:
     needs:
