@@ -66,6 +66,8 @@ async fn get_engine_port() -> Result<u16> {
 
 static ENGINE_PROCESS: LazyLock<Arc<Mutex<Option<tokio::process::Child>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
+static LAST_USE_GPU: LazyLock<tokio::sync::Mutex<bool>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(false));
 static CURRENT_CONNECTIONS: LazyLock<tokio::sync::Mutex<CurrentConnections>> =
     LazyLock::new(|| {
         tokio::sync::Mutex::new(CurrentConnections {
@@ -237,6 +239,14 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
                         }
                         info!("Hello sent");
                     }
+                    manager::ToManagerMessage::ChangeEnginePath => {
+                        info!("ChangeEnginePath received");
+                        tokio::spawn(async {
+                            if let Err(e) = change_engine_path().await {
+                                error!("ChangeEnginePath failed: {:?}", e);
+                            }
+                        });
+                    }
                     manager::ToManagerMessage::Ping => {
                         let mut writer_inner = writer.lock().await;
                         if let Err(e) =
@@ -330,6 +340,17 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
         current_connections.num -= 1;
     }
     result?;
+
+    Ok(())
+}
+async fn change_engine_path() -> Result<()> {
+    let engine_path = ask_engine_path().await?;
+    let mut store = load_store().await?;
+    store.engine_path = engine_path;
+    save_store(&store).await?;
+
+    let last_use_gpu = { *LAST_USE_GPU.lock().await };
+    start_engine(last_use_gpu, true).await?;
 
     Ok(())
 }
@@ -427,6 +448,10 @@ async fn start_engine(use_gpu: bool, force_restart: bool) -> Result<()> {
                 }
             }
         }
+    }
+    {
+        let mut last_use_gpu = LAST_USE_GPU.lock().await;
+        *last_use_gpu = use_gpu;
     }
     let engine_process = tokio::process::Command::new(engine_path)
         .arg("--port")

@@ -36,6 +36,7 @@ pub async fn unpack<T: DeserializeOwned>(
 pub enum ToManagerMessage {
     Hello,
     Ping,
+    ChangeEnginePath,
     Start { use_gpu: bool, force_restart: bool },
 }
 

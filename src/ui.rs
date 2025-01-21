@@ -43,7 +43,7 @@ pub enum UiNotification {
 
 #[derive(Debug, Clone)]
 pub enum ManagerMessage {
-    Start { use_gpu: bool, force_restart: bool },
+    Send(manager::ToManagerMessage),
     Stop,
 }
 
@@ -178,20 +178,9 @@ impl PluginUiImpl {
                             None => break Ok(()),
                         };
                         match message {
-                            ManagerMessage::Start {
-                                use_gpu,
-                                force_restart,
-                            } => {
+                            ManagerMessage::Send(message) => {
                                 let writer = &mut *writer.lock().await;
-                                if let Err(err) = manager::pack(
-                                    manager::ToManagerMessage::Start {
-                                        use_gpu,
-                                        force_restart,
-                                    },
-                                    writer,
-                                )
-                                .await
-                                {
+                                if let Err(err) = manager::pack(message, writer).await {
                                     error!("failed to send restart message: {}", err);
                                     break Err(err);
                                 }
@@ -556,10 +545,17 @@ impl PluginUiImpl {
                 use_gpu,
                 force_restart,
             } => {
-                let _ = manager_sender.send(ManagerMessage::Start {
-                    use_gpu,
-                    force_restart,
-                });
+                let _ =
+                    manager_sender.send(ManagerMessage::Send(manager::ToManagerMessage::Start {
+                        use_gpu,
+                        force_restart,
+                    }));
+                Ok(serde_json::Value::Null)
+            }
+            RequestInner::ChangeEnginePath => {
+                let _ = manager_sender.send(ManagerMessage::Send(
+                    manager::ToManagerMessage::ChangeEnginePath,
+                ));
                 Ok(serde_json::Value::Null)
             }
         }

@@ -55,6 +55,7 @@ pub enum RequestInner {
     GetCurrentPosition,
 
     StartEngine { use_gpu: bool, force_restart: bool },
+    ChangeEnginePath,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
