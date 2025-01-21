@@ -206,7 +206,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            let version = github.ref_name || ${{ github.event.inputs.version }};
+            let version = github.ref_name || ${{ toJSON(github.event.inputs.version) }};
             if (!version) {
               version = "255.255.255";
             }
