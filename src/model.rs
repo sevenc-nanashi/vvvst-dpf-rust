@@ -49,6 +49,21 @@ pub enum RequestInner {
     ShowImportFileDialog(ShowImportFileDialog),
 
     ReadFile(String),
+    WriteFile {
+        path: String,
+        data: String,
+    },
+    CheckFileExists(String),
+
+    ShowExportFileDialog {
+        title: String,
+        default_path: Option<String>,
+        extension_name: String,
+        extensions: Vec<String>,
+    },
+    ShowSaveDirectoryDialog {
+        title: String,
+    },
 
     ExportProject,
 
@@ -56,7 +71,10 @@ pub enum RequestInner {
 
     Zoom(f64),
 
-    StartEngine { use_gpu: bool, force_restart: bool },
+    StartEngine {
+        use_gpu: bool,
+        force_restart: bool,
+    },
     ChangeEnginePath,
 }
 

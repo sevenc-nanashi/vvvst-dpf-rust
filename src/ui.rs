@@ -503,6 +503,44 @@ impl PluginUiImpl {
                 let encoded = base64.encode(&content);
                 Ok(serde_json::to_value(encoded)?)
             }
+            RequestInner::WriteFile { path, data } => {
+                let content = base64.decode(data)?;
+                tokio::fs::write(path, content).await?;
+                Ok(serde_json::Value::Null)
+            }
+            RequestInner::CheckFileExists(path) => {
+                let exists = tokio::fs::metadata(path).await.is_ok();
+                Ok(serde_json::to_value(exists)?)
+            }
+            RequestInner::ShowExportFileDialog {
+                title,
+                default_path,
+                extension_name,
+                extensions,
+            } => {
+                let mut dialog = rfd::AsyncFileDialog::new()
+                    .set_title(title)
+                    .add_filter(extension_name, &extensions);
+                if let Some(default_path) = default_path {
+                    // default_pathはdefault_nameみたいな名前であるべき
+                    // （TODO: 本家を巻き込んで修正）
+                    dialog = dialog.set_file_name(default_path);
+                }
+                let result = dialog.save_file().await;
+
+                return Ok(serde_json::to_value(
+                    result.map(|path| path.path().to_string_lossy().to_string()),
+                )?);
+            }
+            RequestInner::ShowSaveDirectoryDialog { title } => {
+                let dialog = rfd::AsyncFileDialog::new().set_title(title);
+                let result = dialog.pick_folder().await;
+
+                return Ok(serde_json::to_value(
+                    result.map(|path| path.path().to_string_lossy().to_string()),
+                )?);
+            }
+
             RequestInner::ExportProject => {
                 let destination = rfd::AsyncFileDialog::new()
                     .set_title("プロジェクトファイルの書き出し")
