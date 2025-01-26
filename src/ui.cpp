@@ -22,13 +22,10 @@ public:
 
   void uiIdle() override {
     if (!inner) {
-      if (uiRetried) {
-        return;
-      }
-
       // Cubaseだとコンストラクト直後にRust側を初期化すると失敗することがあるので、1回だけリトライする
-      initializeRustUi();
-      uiRetried = true;
+      if (!uiRetried.exchange(true)) {
+        initializeRustUi();
+      }
       return;
     }
     auto lock = std::unique_lock(this->mutex, std::defer_lock);
@@ -50,7 +47,7 @@ public:
 private:
   std::mutex mutex;
   std::shared_ptr<Rust::PluginUi> inner;
-  bool uiRetried = false;
+  std::atomic<bool> uiRetried = false;
 
   void initializeRustUi() {
     auto lock = std::unique_lock(this->mutex);
