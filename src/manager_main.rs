@@ -77,8 +77,6 @@ static CURRENT_CONNECTIONS: LazyLock<tokio::sync::Mutex<CurrentConnections>> =
     });
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_log()?;
-
     let lock_path = manager_path().join("lock");
     let state_path = manager_path().join("state");
     let store_path = manager_path().join("store");
@@ -97,6 +95,8 @@ async fn main() -> Result<()> {
         .await
         .context("failed to open lock file")?;
     if lock_file.try_lock_exclusive().is_ok() {
+        init_log(true)?;
+
         // ロック成功時 = 他のプロセスが起動していない時
         info!("lock success: starting server");
         let server = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -160,6 +160,8 @@ async fn main() -> Result<()> {
 
         result?;
     } else {
+        init_log(false)?;
+
         // ロック失敗時 = 他のプロセスが起動している時。
         // stateが書き込まれるまで待つ
         info!("lock failed: waiting for state file");
@@ -179,13 +181,14 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn init_log() -> Result<()> {
+fn init_log(is_host: bool) -> Result<()> {
     let log_dest = common::log_dir().join(format!(
-        "{}-engine-manager.log",
+        "{}-engine-manager-{}.log",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_secs()
+            .as_secs(),
+        if is_host { "host" } else { "client" }
     ));
     let writer = std::fs::OpenOptions::new()
         .create(true)

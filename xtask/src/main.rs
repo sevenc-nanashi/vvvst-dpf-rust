@@ -452,15 +452,21 @@ fn watch_log() {
         let rx = stop_rx.clone();
         move || watch_log_impl(logs, "plugin", rx)
     });
-    let engine_manager_log = std::thread::spawn({
+    let engine_manager_host_log = std::thread::spawn({
         let logs = logs.clone();
         let rx = stop_rx.clone();
-        move || watch_log_impl(logs, "engine-manager", rx)
+        move || watch_log_impl(logs, "engine-manager-host", rx)
+    });
+    let engine_manager_client_log = std::thread::spawn({
+        let logs = logs.clone();
+        let rx = stop_rx.clone();
+        move || watch_log_impl(logs, "engine-manager-client", rx)
     });
     ctrlc::set_handler(move || {
         green_log!("Stopping", "watching logs");
-        // 3回送ることで両方のスレッドを停止させる。
+        // 4回送ることで全てのスレッドを停止させる。
         // TODO: もう少しまともな方法があれば変更する。
+        stop_tx.send(()).unwrap();
         stop_tx.send(()).unwrap();
         stop_tx.send(()).unwrap();
         stop_tx.send(()).unwrap();
@@ -468,7 +474,8 @@ fn watch_log() {
     .unwrap();
     let _ = stop_rx.recv();
     plugin_log.join().unwrap();
-    engine_manager_log.join().unwrap();
+    engine_manager_host_log.join().unwrap();
+    engine_manager_client_log.join().unwrap();
 
     fn watch_log_impl(
         logs: std::path::PathBuf,
