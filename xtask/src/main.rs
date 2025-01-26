@@ -553,7 +553,7 @@ fn watch_log() {
             path.file_name()
                 .and_then(|name| name.to_str())
                 .unwrap()
-                .split('.')
+                .split('-')
                 .next()
                 .unwrap()
                 .parse::<u64>()
