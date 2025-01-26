@@ -4,6 +4,7 @@
 #include <dpf/dgl/Window.hpp>
 #include <memory>
 #include <mutex>
+#include <atomic>
 
 START_NAMESPACE_DISTRHO
 
