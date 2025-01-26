@@ -54,6 +54,8 @@ pub enum RequestInner {
 
     GetCurrentPosition,
 
+    Zoom(f64),
+
     StartEngine { use_gpu: bool, force_restart: bool },
     ChangeEnginePath,
 }

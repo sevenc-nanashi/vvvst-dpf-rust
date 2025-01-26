@@ -29,6 +29,8 @@ pub struct PluginUiImpl {
 
     manager: tokio::task::JoinHandle<()>,
     manager_sender: UnboundedSender<ManagerMessage>,
+
+    zoom_receiver: UnboundedReceiver<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +81,7 @@ impl PluginUiImpl {
 
         let (manager_sender, mut manager_receiver) = tokio::sync::mpsc::unbounded_channel();
         let notification_sender = Arc::new(notification_sender);
+
         let manager = RUNTIME.spawn(async move {
             let manager_name = if cfg!(target_os = "windows") {
                 "engine-manager.exe"
@@ -212,6 +215,8 @@ impl PluginUiImpl {
             tokio::sync::mpsc::unbounded_channel::<Response>();
         let response_sender = Arc::new(response_sender);
 
+        let (zoom_sender, zoom_receiver) = tokio::sync::mpsc::unbounded_channel();
+
         let plugin_ref = Arc::clone(&plugin);
 
         let mut web_context = wry::WebContext::new(Some(common::data_dir().join("webview_cache")));
@@ -265,6 +270,7 @@ impl PluginUiImpl {
                     let plugin_ref = Arc::clone(&plugin_ref);
                     let message = message.body().to_string();
                     let manager_sender = manager_sender.clone();
+                    let zoom_sender = zoom_sender.clone();
                     RUNTIME.spawn(async move {
                         let value = match serde_json::from_str::<serde_json::Value>(&message) {
                             Ok(value) => value,
@@ -293,9 +299,13 @@ impl PluginUiImpl {
                                 return;
                             }
                         };
-                        let result =
-                            PluginUiImpl::handle_request(plugin_ref, manager_sender, value.inner)
-                                .await;
+                        let result = PluginUiImpl::handle_request(
+                            plugin_ref,
+                            manager_sender,
+                            zoom_sender,
+                            value.inner,
+                        )
+                        .await;
                         let response = Response {
                             request_id: value.request_id,
                             payload: match result {
@@ -324,6 +334,7 @@ impl PluginUiImpl {
             manager_sender,
             notification_receiver,
             response_receiver,
+            zoom_receiver,
         })
     }
 
@@ -339,20 +350,24 @@ impl PluginUiImpl {
             info!("rust->js notification: {:?}", notification);
             let js = format!(
                 r#"
-                const notification = {};
-                console.log("notification", notification);
-                const sendNotification = () => {{
-                    if (window.onIpcNotification == null) {{
-                        setTimeout(sendNotification, 0);
-                    }} else {{
-                        window.onIpcNotification(notification);
+                (async () => {{
+                    const notification = {};
+                    while (true) {{
+                        if (window.onIpcNotification != null) {{
+                            break;
+                        }}
+                        await new Promise(resolve => setTimeout(resolve, 0));
                     }}
-                }};
-                sendNotification();
+                    window.onIpcNotification(notification);
+                }})();
                 "#,
                 serde_json::to_string(&notification).unwrap()
             );
             self.webview.evaluate_script(&js)?;
+        }
+
+        while let Ok(zoom) = self.zoom_receiver.try_recv() {
+            self.webview.zoom(zoom)?;
         }
 
         Ok(())
@@ -373,6 +388,7 @@ impl PluginUiImpl {
     async fn handle_request(
         plugin: Arc<Mutex<PluginImpl>>,
         manager_sender: UnboundedSender<ManagerMessage>,
+        zoom_sender: UnboundedSender<f64>,
         request: RequestInner,
     ) -> Result<serde_json::Value> {
         let params = {
@@ -537,6 +553,10 @@ impl PluginUiImpl {
                 } else {
                     Ok(serde_json::Value::Null)
                 }
+            }
+            RequestInner::Zoom(value) => {
+                let _ = zoom_sender.send(value);
+                Ok(serde_json::Value::Null)
             }
             RequestInner::StartEngine {
                 use_gpu,
