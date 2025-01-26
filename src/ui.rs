@@ -20,9 +20,6 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 
-// https://stackoverflow.com/a/75292572
-const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
-
 static EDITOR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/resources/editor");
 pub struct PluginUiImpl {
     webview: Arc<wry::WebView>,
@@ -101,7 +98,7 @@ impl PluginUiImpl {
                 .stderr(std::process::Stdio::piped())
                 .pipe(|cmd| {
                     #[cfg(target_os = "windows")]
-                    let cmd = cmd.creation_flags(WINDOWS_CREATE_NO_WINDOW);
+                    let cmd = cmd.creation_flags(common::WINDOWS_CREATE_NO_WINDOW);
                     cmd
                 })
                 .spawn()

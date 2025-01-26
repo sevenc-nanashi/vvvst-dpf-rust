@@ -13,7 +13,7 @@ use fs4::fs_err3_tokio::AsyncFileExt;
 use manager::pack;
 use serde::{Deserialize, Serialize};
 use tap::prelude::*;
-use tokio::sync::Mutex;
+use tokio::{io::AsyncBufReadExt, sync::Mutex};
 use tracing::{debug, error, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,15 +77,8 @@ static CURRENT_CONNECTIONS: LazyLock<tokio::sync::Mutex<CurrentConnections>> =
     });
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_max_level(if cfg!(debug_assertions) {
-            tracing::Level::DEBUG
-        } else {
-            tracing::Level::INFO
-        })
-        .with_ansi(false)
-        .init();
+    init_log()?;
+
     let lock_path = manager_path().join("lock");
     let state_path = manager_path().join("state");
     let store_path = manager_path().join("store");
@@ -183,6 +176,33 @@ async fn main() -> Result<()> {
 
         println!("{}", state.manager_port);
     }
+    Ok(())
+}
+
+fn init_log() -> Result<()> {
+    let log_dest = common::log_dir().join(format!(
+        "{}-engine-manager.log",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    ));
+    let writer = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&log_dest)?;
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_max_level(if cfg!(debug_assertions) {
+            tracing::Level::DEBUG
+        } else {
+            tracing::Level::INFO
+        })
+        .with_ansi(false)
+        .with_writer(writer)
+        .init();
+
     Ok(())
 }
 
@@ -453,19 +473,59 @@ async fn start_engine(use_gpu: bool, force_restart: bool) -> Result<()> {
         let mut last_use_gpu = LAST_USE_GPU.lock().await;
         *last_use_gpu = use_gpu;
     }
-    let engine_process = tokio::process::Command::new(engine_path)
+    let mut engine_process = tokio::process::Command::new(engine_path)
         .arg("--port")
         .arg(port.to_string())
         .pipe(|cmd| if use_gpu { cmd.arg("--use_gpu") } else { cmd })
         .tap(|cmd| info!("starting engine: {:?}", cmd))
-        .stdout(std::io::stderr())
-        .stderr(std::io::stderr())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .pipe(|cmd| {
+            #[cfg(target_os = "windows")]
+            let cmd = cmd.creation_flags(common::WINDOWS_CREATE_NO_WINDOW);
+
+            cmd
+        })
         .spawn()?;
+    log_stdout_stderr(
+        engine_process.stdout.take().unwrap(),
+        engine_process.stderr.take().unwrap(),
+    )?;
     {
         let mut engine_process_lock = ENGINE_PROCESS.lock().await;
         *engine_process_lock = Some(engine_process);
     }
     info!("engine started");
+
+    Ok(())
+}
+
+fn log_stdout_stderr(
+    stdout: tokio::process::ChildStdout,
+    stderr: tokio::process::ChildStderr,
+) -> Result<()> {
+    let mut stdout = tokio::io::BufReader::new(stdout).lines();
+    let mut stderr = tokio::io::BufReader::new(stderr).lines();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                line = stdout.next_line() => {
+                    match line {
+                        Ok(Some(line)) => debug!("engine stdout: {}", line),
+                        Err(e) => error!("failed to read engine stdout: {:?}", e),
+                        Ok(None) => break,
+                    }
+                }
+                line = stderr.next_line() => {
+                    match line {
+                        Ok(Some(line)) => error!("engine stderr: {}", line),
+                        Err(e) => error!("failed to read engine stderr: {:?}", e),
+                        Ok(None) => break,
+                    }
+                }
+            }
+        }
+    });
 
     Ok(())
 }
