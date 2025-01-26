@@ -1,8 +1,9 @@
 use crate::{
-    common::RUNTIME,
+    common,
     model::{ChannelMode, Phrase, Routing, SingingVoiceKey, Track, TrackId},
     saturating_ext::SaturatingMath,
     ui::UiNotification,
+    vst_common::RUNTIME,
 };
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
@@ -119,42 +120,37 @@ static INIT: Once = Once::new();
 impl PluginImpl {
     pub fn new(params: PluginParams) -> Self {
         INIT.call_once(|| {
-            if option_env!("VVVST_LOG").map_or(false, |v| v.len() > 0) {
-                let dest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR").to_string())
-                    .join("logs")
-                    .join(format!(
-                        "{}.log",
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs()
-                    ));
+            let dest = common::log_dir().join(format!(
+                "{}-plugin.log",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+            ));
 
-                let Ok(writer) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .truncate(true)
-                    .open(&dest)
-                else {
-                    return;
-                };
+            let Ok(writer) = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&dest)
+            else {
+                return;
+            };
 
-                let default_panic_hook = std::panic::take_hook();
+            let default_panic_hook = std::panic::take_hook();
 
-                std::panic::set_hook(Box::new(move |info| {
-                    let mut panic_writer =
-                        std::fs::File::create(dest.with_extension("panic")).unwrap();
-                    let backtrace = std::backtrace::Backtrace::force_capture();
-                    let _ = writeln!(panic_writer, "{}\n{}", info, backtrace);
+            std::panic::set_hook(Box::new(move |info| {
+                let mut panic_writer = std::fs::File::create(dest.with_extension("panic")).unwrap();
+                let backtrace = std::backtrace::Backtrace::force_capture();
+                let _ = writeln!(panic_writer, "{}\n{}", info, backtrace);
 
-                    default_panic_hook(info);
-                }));
+                default_panic_hook(info);
+            }));
 
-                let _ = tracing_subscriber::fmt()
-                    .with_writer(writer)
-                    .with_ansi(false)
-                    .try_init();
-            }
+            let _ = tracing_subscriber::fmt()
+                .with_writer(writer)
+                .with_ansi(false)
+                .try_init();
         });
         PluginImpl {
             notification_sender: None,

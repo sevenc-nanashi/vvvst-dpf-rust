@@ -2,6 +2,11 @@ name: "Build"
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version"
+        required: true
+        default: "255.255.255"
 
   push:
   pull_request:
@@ -113,7 +118,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            let version = github.ref_name;
+            let version = github.ref_name || ${{ toJSON(github.event.inputs.version) }};
             if (!version) {
               version = "255.255.255";
             }
@@ -172,6 +177,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: |
           cargo xtask generate-installer
+          cp ./build/VVVST-*-windows-setup.exe ./
 
       - name: Upload
         uses: actions/upload-artifact@v4
@@ -180,7 +186,7 @@ jobs:
           path: |
             ${{ steps.determine-information.outputs.zip_name }}
             ${{ steps.determine-information.outputs.au_name }}
-            build/VVVST-*-windows-setup.exe
+            VVVST-*-windows-setup.exe
 
   release:
     needs:
@@ -201,7 +207,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            let version = github.ref_name;
+            let version = github.ref_name || ${{ toJSON(github.event.inputs.version) }};
             if (!version) {
               version = "255.255.255";
             }

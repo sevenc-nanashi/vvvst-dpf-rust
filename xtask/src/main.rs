@@ -394,7 +394,8 @@ fn generate_installer() {
     let main_cargo_toml = main_crate.join("Cargo.toml");
     let main_cargo_toml = cargo_toml::Manifest::from_path(&main_cargo_toml).unwrap();
 
-    let version: String = main_cargo_toml.package.unwrap().version.unwrap();
+    let version = main_cargo_toml.package.unwrap().version.unwrap();
+    let version = semver::Version::parse(&version).unwrap();
 
     let installer_base = main_crate
         .join("resources")
@@ -405,7 +406,10 @@ fn generate_installer() {
     let installer_base = std::fs::read_to_string(&installer_base).unwrap();
     std::fs::write(
         &installer_dist,
-        installer_base.replace("{version}", &version),
+        installer_base.replace(
+            "{version}",
+            format!("{}.{}.{}", version.major, version.minor, version.patch).as_str(),
+        ),
     )
     .unwrap();
     blue_log!("Building", "wrote nsis script to {:?}", installer_dist);
@@ -424,6 +428,15 @@ fn generate_installer() {
     );
 }
 
+#[derive(Debug)]
+struct CrossbeamEventHandler(crossbeam_channel::Sender<notify::Result<notify::Event>>);
+
+impl notify::EventHandler for CrossbeamEventHandler {
+    fn handle_event(&mut self, event: notify::Result<notify::Event>) {
+        self.0.send(event).unwrap();
+    }
+}
+
 fn watch_log() {
     let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -433,55 +446,101 @@ fn watch_log() {
         panic!("Logs not found at {:?}", logs);
     }
 
-    let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
-    let mut watcher = notify::recommended_watcher(tx).unwrap();
-    watcher
-        .watch(&logs, notify::RecursiveMode::Recursive)
-        .unwrap();
-    let mut current_log = find_log(&logs);
-    let mut current_log_process: Option<duct::Handle> = None;
+    let (stop_tx, stop_rx) = crossbeam_channel::unbounded::<()>();
+    let plugin_log = std::thread::spawn({
+        let logs = logs.clone();
+        let rx = stop_rx.clone();
+        move || watch_log_impl(logs, "plugin", rx)
+    });
+    let engine_manager_host_log = std::thread::spawn({
+        let logs = logs.clone();
+        let rx = stop_rx.clone();
+        move || watch_log_impl(logs, "engine-manager-host", rx)
+    });
+    let engine_manager_client_log = std::thread::spawn({
+        let logs = logs.clone();
+        let rx = stop_rx.clone();
+        move || watch_log_impl(logs, "engine-manager-client", rx)
+    });
+    ctrlc::set_handler(move || {
+        green_log!("Stopping", "watching logs");
+        // 4回送ることで全てのスレッドを停止させる。
+        // TODO: もう少しまともな方法があれば変更する。
+        stop_tx.send(()).unwrap();
+        stop_tx.send(()).unwrap();
+        stop_tx.send(()).unwrap();
+        stop_tx.send(()).unwrap();
+    })
+    .unwrap();
+    let _ = stop_rx.recv();
+    plugin_log.join().unwrap();
+    engine_manager_host_log.join().unwrap();
+    engine_manager_client_log.join().unwrap();
 
-    if let Some(ref current_log) = current_log {
-        green_log!("Watching", "current log: {:?}", current_log);
-        current_log_process = Some(duct::cmd!("tail", "-f", current_log).start().unwrap());
-    } else {
-        green_log!("Watching", "no log found");
-    }
+    fn watch_log_impl(
+        logs: std::path::PathBuf,
+        suffix: &str,
+        stop_rx: crossbeam_channel::Receiver<()>,
+    ) -> () {
+        let (tx, rx) = crossbeam_channel::unbounded::<notify::Result<notify::Event>>();
+        let mut watcher = notify::recommended_watcher(CrossbeamEventHandler(tx)).unwrap();
+        watcher
+            .watch(&logs, notify::RecursiveMode::Recursive)
+            .unwrap();
+        let mut current_log = find_log(&logs, suffix);
+        let mut current_log_process: Option<duct::Handle> = None;
 
-    for event in rx {
-        let event = event.unwrap();
-        match event.kind {
-            notify::EventKind::Create(_) | notify::EventKind::Remove(_) => {
-                let new_log = find_log(&logs);
-                if new_log != current_log {
+        if let Some(ref current_log) = current_log {
+            green_log!("Watching", "current log: {:?}", current_log);
+            current_log_process = Some(duct::cmd!("tail", "-f", current_log).start().unwrap());
+        } else {
+            green_log!("Watching", "no log found for {:?}", suffix);
+        }
+
+        'outer: loop {
+            crossbeam_channel::select! {
+                recv(stop_rx) -> _ => {
                     if let Some(ref mut current_log_process) = current_log_process {
                         current_log_process.kill().unwrap();
                     }
-                    if let Some(ref new_log) = new_log {
-                        green_log!("Watching", "new log: {:?}", new_log);
-                        current_log_process =
-                            Some(duct::cmd!("tail", "-f", new_log).start().unwrap());
-                    } else {
-                        green_log!("Watching", "no log found");
-                    }
-                    current_log = new_log;
+                    break 'outer;
                 }
+                recv(rx) -> event => {
+                    let event = event.unwrap().unwrap();
+                    match event.kind {
+                        notify::EventKind::Create(_) | notify::EventKind::Remove(_) => {
+                            let new_log = find_log(&logs, suffix);
+                            if new_log != current_log {
+                                if let Some(ref mut current_log_process) = current_log_process {
+                                    current_log_process.kill().unwrap();
+                                }
+                                if let Some(ref new_log) = new_log {
+                                    green_log!("Watching", "new log: {:?}", new_log);
+                                    current_log_process =
+                                        Some(duct::cmd!("tail", "-f", new_log).start().unwrap());
+                                } else {
+                                    green_log!("Watching", "no log found for {:?}", suffix);
+                                }
+                                current_log = new_log;
+                            }
 
-                if let Some(ref current_log) = current_log {
-                    let panic_path = current_log.with_extension("panic");
-                    if panic_path.exists() {
-                        let panic = std::fs::read_to_string(&panic_path).unwrap();
-                        red_log!("Panicked", "{}", panic);
+                            if let Some(ref current_log) = current_log {
+                                let panic_path = current_log.with_extension("panic");
+                                if panic_path.exists() {
+                                    let panic = std::fs::read_to_string(&panic_path).unwrap();
+                                    red_log!("Panicked", "{}", panic);
+                                }
+                            }
+                        }
+                        _ => {
+                            continue;
+                        }
                     }
                 }
-            }
-            _ => {
-                continue;
             }
         }
     }
-
-    fn find_log(logs_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    fn find_log(logs_dir: &std::path::Path, suffix: &str) -> Option<std::path::PathBuf> {
         let mut current_logs = std::fs::read_dir(&logs_dir)
             .unwrap()
             .map(|entry| entry.unwrap().path())
@@ -491,14 +550,17 @@ fn watch_log() {
                     && path
                         .file_name()
                         .and_then(|name| name.to_str())
-                        .is_some_and(|name| name.split('.').next().unwrap().parse::<u64>().is_ok())
+                        .is_some_and(|name| {
+                            name.split('-').next().unwrap().parse::<u64>().is_ok()
+                                && name.contains(format!("-{}.", suffix).as_str())
+                        })
             })
             .collect::<Vec<_>>();
         current_logs.sort_by_key(|path| {
             path.file_name()
                 .and_then(|name| name.to_str())
                 .unwrap()
-                .split('.')
+                .split('-')
                 .next()
                 .unwrap()
                 .parse::<u64>()

@@ -1,4 +1,4 @@
-use crate::{common::RUNTIME, model::*, plugin::PluginImpl};
+use crate::{common, manager, model::*, plugin::PluginImpl, vst_common::RUNTIME};
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -10,23 +10,38 @@ use std::{
     ptr::NonNull,
     sync::Arc,
 };
-use tokio::sync::{mpsc::UnboundedReceiver, Mutex};
+use tap::prelude::*;
+use tokio::{
+    io::AsyncBufReadExt,
+    sync::{
+        mpsc::{UnboundedReceiver, UnboundedSender},
+        Mutex,
+    },
+};
 use tracing::{error, info, warn};
 
 static EDITOR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/resources/editor");
 pub struct PluginUiImpl {
     webview: Arc<wry::WebView>,
 
-    _data_dir: tempfile::TempDir,
-
     notification_receiver: UnboundedReceiver<UiNotification>,
     response_receiver: UnboundedReceiver<Response>,
+
+    manager: tokio::task::JoinHandle<()>,
+    manager_sender: UnboundedSender<ManagerMessage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type", content = "payload")]
 pub enum UiNotification {
     UpdatePlayingState(bool),
+    EngineReady { port: u16 },
+}
+
+#[derive(Debug, Clone)]
+pub enum ManagerMessage {
+    Send(manager::ToManagerMessage),
+    Stop,
 }
 
 impl PluginUiImpl {
@@ -59,8 +74,139 @@ impl PluginUiImpl {
         let (notification_sender, notification_receiver) = tokio::sync::mpsc::unbounded_channel();
         {
             let mut plugin = plugin.blocking_lock();
-            plugin.notification_sender = Some(notification_sender);
+            plugin.notification_sender = Some(notification_sender.clone());
         }
+
+        let (manager_sender, mut manager_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let notification_sender = Arc::new(notification_sender);
+        let manager = RUNTIME.spawn(async move {
+            let manager_name = if cfg!(target_os = "windows") {
+                "engine-manager.exe"
+            } else {
+                "engine-manager"
+            };
+            let manager_path = process_path::get_dylib_path()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join(manager_name);
+            info!("engine-manager path: {:?}", manager_path);
+            let mut manager_process = tokio::process::Command::new(manager_path)
+                .arg(handle.to_string())
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .pipe(|cmd| {
+                    #[cfg(target_os = "windows")]
+                    let cmd = cmd.creation_flags(common::WINDOWS_CREATE_NO_WINDOW);
+                    cmd
+                })
+                .spawn()
+                .unwrap();
+            info!("engine-manager started: {:?}", &manager_process);
+            let stderr = manager_process.stderr.take().unwrap();
+            let stderr = tokio::io::BufReader::new(stderr);
+            tokio::spawn(async move {
+                let mut lines = stderr.lines();
+                while let Some(line) = lines.next_line().await.unwrap() {
+                    error!("engine-manager stderr: {:?}", line);
+                }
+            });
+            let port = tokio::io::BufReader::new(manager_process.stdout.as_mut().unwrap())
+                .lines()
+                .next_line()
+                .await
+                .expect("failed to read port")
+                .inspect(|line| info!("engine-manager stdout: {:?}", line))
+                .expect("failed to read port")
+                .parse::<u16>()
+                .unwrap();
+            info!("engine-manager port: {}", port);
+            let mut manager_connection = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .unwrap();
+            manager::pack(manager::ToManagerMessage::Hello, &mut manager_connection)
+                .await
+                .unwrap();
+            let (mut reader, writer) = manager_connection.into_split();
+            let writer = Arc::new(Mutex::new(writer));
+            let manager_communication = async {
+                loop {
+                    let message = match manager::unpack(&mut reader).await {
+                        Ok(message) => message,
+                        Err(err) => {
+                            error!("failed to read message: {}", err);
+                            break Err::<(), _>(err);
+                        }
+                    };
+                    match message {
+                        manager::ToClientMessage::Hello => {
+                            info!("received hello from engine-manager");
+                        }
+                        manager::ToClientMessage::Pong => {
+                            // noop
+                        }
+                        manager::ToClientMessage::EnginePort(port) => {
+                            info!("received engine ready from engine-manager: {}", port);
+                            let _ = notification_sender.send(UiNotification::EngineReady { port });
+                        }
+                    }
+                }
+            };
+            let ping = {
+                let writer = Arc::clone(&writer);
+                async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        let writer = &mut *writer.lock().await;
+                        if let Err(e) = manager::pack(manager::ToManagerMessage::Ping, writer).await
+                        {
+                            error!("failed to send ping: {}", e);
+                            break Err::<(), _>(e);
+                        }
+                    }
+                }
+            };
+            let manager_sender_communication = {
+                async {
+                    loop {
+                        let message = match manager_receiver.recv().await {
+                            Some(message) => message,
+                            None => break Ok(()),
+                        };
+                        match message {
+                            ManagerMessage::Send(message) => {
+                                let writer = &mut *writer.lock().await;
+                                if let Err(err) = manager::pack(message, writer).await {
+                                    error!("failed to send restart message: {}", err);
+                                    break Err(err);
+                                }
+                            }
+                            ManagerMessage::Stop => {
+                                break Ok(());
+                            }
+                        }
+                    }
+                }
+            };
+            let result = tokio::select! {
+                result = manager_communication => {
+                    result
+                }
+                result = manager_sender_communication => {
+                    result
+                }
+                result = ping => {
+                    result
+                }
+            };
+
+            if let Err(err) = result {
+                error!("engine manager communication failed: {}", err);
+            }
+
+            info!("engine manager connection closed");
+        });
 
         let (response_sender, response_receiver) =
             tokio::sync::mpsc::unbounded_channel::<Response>();
@@ -68,12 +214,15 @@ impl PluginUiImpl {
 
         let plugin_ref = Arc::clone(&plugin);
 
-        let temp_dir = tempfile::TempDir::new()?;
-        let mut web_context = wry::WebContext::new(Some(temp_dir.path().to_path_buf()));
+        let mut web_context = wry::WebContext::new(Some(common::data_dir().join("webview_cache")));
         let webview_builder = wry::WebViewBuilder::with_web_context(&mut web_context)
             .with_bounds(wry::Rect {
                 position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
-                size: winit::dpi::LogicalSize::new(width as f64 / scale_factor, height as f64 / scale_factor).into(),
+                size: winit::dpi::LogicalSize::new(
+                    width as f64 / scale_factor,
+                    height as f64 / scale_factor,
+                )
+                .into(),
             })
             .with_clipboard(true)
             .with_background_color((165, 212, 173, 255))
@@ -101,55 +250,64 @@ impl PluginUiImpl {
                             .unwrap()
                     })
             })
-            .with_url(if cfg!(debug_assertions) {
-                option_env!("VVVST_DEV_SERVER_URL").unwrap_or("http://localhost:5173")
-            } else {
-                "app://vvvst.localhost/index.html"
+            .with_url({
+                let base_url = if cfg!(debug_assertions) {
+                    option_env!("VVVST_DEV_SERVER_URL").unwrap_or("http://localhost:5173")
+                } else {
+                    "app://vvvst.localhost/index.html"
+                };
+                format!("{}?engineStatus=notRunning", base_url)
             })
-            .with_ipc_handler(move |message| {
-                let response_sender = Arc::clone(&response_sender);
-                let plugin_ref = Arc::clone(&plugin_ref);
-                let message = message.body().to_string();
-                RUNTIME.spawn(async move {
-                    let value = match serde_json::from_str::<serde_json::Value>(&message) {
-                        Ok(value) => value,
-                        Err(err) => {
-                            error!("failed to parse message: {}", err);
-                            return;
-                        }
-                    };
-                    let value = match serde_json::from_value::<Request>(value.clone()) {
-                        Ok(value) => value,
-                        Err(err) => {
-                            // 可能な限りエラーを返してあげる
-                            let request_id = value["requestId"].as_u64();
-                            if let Some(request_id) = request_id {
-                                let response = Response {
-                                    request_id: RequestId(request_id as u32),
-                                    payload: Err(format!("failed to parse request: {}", err)),
-                                };
-                                warn!("failed to parse request: {}", err);
-                                if let Err(err) = response_sender.send(response) {
-                                    error!("failed to send response: {}", err);
-                                }
-                            } else {
-                                error!("failed to parse request: {}", err);
+            .with_ipc_handler({
+                let manager_sender = manager_sender.clone();
+                move |message| {
+                    let response_sender = Arc::clone(&response_sender);
+                    let plugin_ref = Arc::clone(&plugin_ref);
+                    let message = message.body().to_string();
+                    let manager_sender = manager_sender.clone();
+                    RUNTIME.spawn(async move {
+                        let value = match serde_json::from_str::<serde_json::Value>(&message) {
+                            Ok(value) => value,
+                            Err(err) => {
+                                error!("failed to parse message: {}", err);
+                                return;
                             }
-                            return;
+                        };
+                        let value = match serde_json::from_value::<Request>(value.clone()) {
+                            Ok(value) => value,
+                            Err(err) => {
+                                // 可能な限りエラーを返してあげる
+                                let request_id = value["requestId"].as_u64();
+                                if let Some(request_id) = request_id {
+                                    let response = Response {
+                                        request_id: RequestId(request_id as u32),
+                                        payload: Err(format!("failed to parse request: {}", err)),
+                                    };
+                                    warn!("failed to parse request: {}", err);
+                                    if let Err(err) = response_sender.send(response) {
+                                        error!("failed to send response: {}", err);
+                                    }
+                                } else {
+                                    error!("failed to parse request: {}", err);
+                                }
+                                return;
+                            }
+                        };
+                        let result =
+                            PluginUiImpl::handle_request(plugin_ref, manager_sender, value.inner)
+                                .await;
+                        let response = Response {
+                            request_id: value.request_id,
+                            payload: match result {
+                                Ok(value) => Ok(value),
+                                Err(err) => Err(err.to_string()),
+                            },
+                        };
+                        if let Err(err) = response_sender.send(response) {
+                            error!("failed to send response: {}", err);
                         }
-                    };
-                    let result = PluginUiImpl::handle_request(plugin_ref, value.inner).await;
-                    let response = Response {
-                        request_id: value.request_id,
-                        payload: match result {
-                            Ok(value) => Ok(value),
-                            Err(err) => Err(err.to_string()),
-                        },
-                    };
-                    if let Err(err) = response_sender.send(response) {
-                        error!("failed to send response: {}", err);
-                    }
-                });
+                    });
+                }
             });
 
         #[cfg(target_os = "linux")]
@@ -162,8 +320,8 @@ impl PluginUiImpl {
         Ok(PluginUiImpl {
             webview,
 
-            _data_dir: temp_dir,
-
+            manager,
+            manager_sender,
             notification_receiver,
             response_receiver,
         })
@@ -180,7 +338,18 @@ impl PluginUiImpl {
         if let Ok(notification) = self.notification_receiver.try_recv() {
             info!("rust->js notification: {:?}", notification);
             let js = format!(
-                r#"window.onIpcNotification({})"#,
+                r#"
+                const notification = {};
+                console.log("notification", notification);
+                const sendNotification = () => {{
+                    if (window.onIpcNotification == null) {{
+                        setTimeout(sendNotification, 0);
+                    }} else {{
+                        window.onIpcNotification(notification);
+                    }}
+                }};
+                sendNotification();
+                "#,
                 serde_json::to_string(&notification).unwrap()
             );
             self.webview.evaluate_script(&js)?;
@@ -192,13 +361,18 @@ impl PluginUiImpl {
     pub fn set_size(&self, width: usize, height: usize, scale_factor: f64) -> Result<()> {
         self.webview.set_bounds(wry::Rect {
             position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
-            size: winit::dpi::LogicalSize::new(width as f64 / scale_factor, height as f64 / scale_factor).into(),
+            size: winit::dpi::LogicalSize::new(
+                width as f64 / scale_factor,
+                height as f64 / scale_factor,
+            )
+            .into(),
         })?;
         Ok(())
     }
 
     async fn handle_request(
         plugin: Arc<Mutex<PluginImpl>>,
+        manager_sender: UnboundedSender<ManagerMessage>,
         request: RequestInner,
     ) -> Result<serde_json::Value> {
         let params = {
@@ -209,27 +383,19 @@ impl PluginUiImpl {
             RequestInner::GetVersion => Ok(serde_json::to_value(env!("CARGO_PKG_VERSION"))?),
             RequestInner::GetProjectName => Ok(serde_json::to_value("VVVST")?),
             RequestInner::GetConfig => {
-                // Windows: %APPDATA%/voicevox/config.json
-                // macOS: ~/Library/Application Support/voicevox/config.json
-                // Linux: ~/.config/voicevox/config.json
-                let config_path = if cfg!(target_os = "windows") {
-                    let appdata = std::env::var("APPDATA")?;
-                    std::path::PathBuf::from(appdata).join("voicevox/config.json")
-                } else if cfg!(target_os = "macos") {
-                    let home = std::env::var("HOME")?;
-                    std::path::PathBuf::from(home)
-                        .join("Library/Application Support/voicevox/config.json")
+                let config = tokio::fs::read_to_string(if editor_config_path().exists() {
+                    editor_config_path()
                 } else {
-                    let home = std::env::var("HOME")?;
-                    std::path::PathBuf::from(home).join(".config/voicevox/config.json")
-                };
-
-                if !config_path.exists() {
-                    return Ok(serde_json::Value::Null);
-                }
-                let config = tokio::fs::read_to_string(config_path).await?;
+                    original_config_path()
+                })
+                .await?;
 
                 Ok(serde_json::to_value(config)?)
+            }
+            RequestInner::SetConfig(config) => {
+                let config_path = editor_config_path();
+                tokio::fs::write(&config_path, config).await?;
+                Ok(serde_json::Value::Null)
             }
             RequestInner::GetProject => {
                 let project = params.read().await.project.clone();
@@ -372,6 +538,55 @@ impl PluginUiImpl {
                     Ok(serde_json::Value::Null)
                 }
             }
+            RequestInner::StartEngine {
+                use_gpu,
+                force_restart,
+            } => {
+                let _ =
+                    manager_sender.send(ManagerMessage::Send(manager::ToManagerMessage::Start {
+                        use_gpu,
+                        force_restart,
+                    }));
+                Ok(serde_json::Value::Null)
+            }
+            RequestInner::ChangeEnginePath => {
+                let _ = manager_sender.send(ManagerMessage::Send(
+                    manager::ToManagerMessage::ChangeEnginePath,
+                ));
+                Ok(serde_json::Value::Null)
+            }
         }
+    }
+
+    pub async fn terminate(self) -> Result<()> {
+        if let Err(_) = self.manager_sender.send(ManagerMessage::Stop) {
+            error!("failed to send stop signal");
+        }
+
+        self.manager.await?;
+
+        Ok(())
+    }
+}
+
+/// Voicevox VSTのエディタの設定ファイルのパスを返す
+pub fn editor_config_path() -> std::path::PathBuf {
+    common::data_dir().join("config.json")
+}
+
+/// Voicevox本家のconfig.jsonのパスを返す
+pub fn original_config_path() -> std::path::PathBuf {
+    // Windows: %APPDATA%/voicevox/config.json
+    // macOS: ~/Library/Application Support/voicevox/config.json
+    // Linux: ~/.config/voicevox/config.json
+    if cfg!(target_os = "windows") {
+        let appdata = std::env::var("APPDATA").unwrap();
+        std::path::PathBuf::from(appdata).join("voicevox/config.json")
+    } else if cfg!(target_os = "macos") {
+        let home = std::env::var("HOME").unwrap();
+        std::path::PathBuf::from(home).join("Library/Application Support/voicevox/config.json")
+    } else {
+        let home = std::env::var("HOME").unwrap();
+        std::path::PathBuf::from(home).join(".config/voicevox/config.json")
     }
 }

@@ -1,13 +1,15 @@
 mod common;
+mod manager;
 mod model;
 mod plugin;
 mod saturating_ext;
 mod ui;
+mod vst_common;
 
-use common::NUM_CHANNELS;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
+use vst_common::NUM_CHANNELS;
 
 pub struct Plugin {
     inner: Arc<Mutex<plugin::PluginImpl>>,
@@ -27,15 +29,12 @@ pub struct Version {
 #[no_mangle]
 unsafe extern "C-unwind" fn get_version() -> Version {
     let version = env!("CARGO_PKG_VERSION");
-    let version_split = version.split('.').collect::<Vec<_>>();
-    let major = version_split[0].parse::<u8>().unwrap();
-    let minor = version_split[1].parse::<u8>().unwrap();
-    let patch = version_split[2].parse::<u8>().unwrap();
+    let version = semver::Version::parse(version).unwrap();
 
     Version {
-        major,
-        minor,
-        patch,
+        major: version.major as _,
+        minor: version.minor as _,
+        patch: version.patch as _,
     }
 }
 
@@ -173,5 +172,17 @@ unsafe extern "C-unwind" fn plugin_ui_drop(plugin_ui: *mut PluginUi) {
     }
 
     let plugin_ui = Box::from_raw(plugin_ui);
-    drop(plugin_ui);
+    let plugin_ui = match Arc::try_unwrap(plugin_ui.inner) {
+        Ok(plugin_ui) => plugin_ui,
+        Err(_) => {
+            error!("Failed to drop PluginUi: still has references");
+            return;
+        }
+    };
+    let plugin_ui = plugin_ui.into_inner();
+
+    match vst_common::RUNTIME.block_on(plugin_ui.terminate()) {
+        Ok(_) => info!("PluginUi dropped"),
+        Err(e) => error!("Failed to drop PluginUi: {}", e),
+    }
 }
