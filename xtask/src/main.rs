@@ -8,6 +8,9 @@ use std::{
     io::Write,
 };
 
+#[path = "../../src/common.rs"]
+mod common;
+
 macro_rules! green_log {
     ($subject:expr, $($args:tt)+) => {
         println!("{:>12} {}", $subject.bold().green(), &format!($($args)*));
@@ -57,7 +60,7 @@ enum SubCommands {
 
     /// ログを確認する。
     #[command(version, about, long_about = None)]
-    WatchLog,
+    WatchLog(WatchLogArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -71,6 +74,13 @@ struct BuildArgs {
     /// 開発用サーバーのURL。デフォルトはhttp://localhost:5173。
     #[clap(short, long)]
     dev_server_url: Option<String>,
+}
+
+#[derive(Parser, Debug)]
+struct WatchLogArgs {
+    /// 製品版のログを確認するかどうか。
+    #[clap(short, long)]
+    release: bool,
 }
 
 fn generate_bridge() {
@@ -437,11 +447,15 @@ impl notify::EventHandler for CrossbeamEventHandler {
     }
 }
 
-fn watch_log() {
-    let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap();
-    let logs = main_crate.join("logs");
+fn watch_log(args: WatchLogArgs) {
+    let logs = if args.release {
+        let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap();
+        main_crate.join("logs")
+    } else {
+        common::log_dir()
+    };
     if !logs.exists() {
         panic!("Logs not found at {:?}", logs);
     }
@@ -587,8 +601,8 @@ fn main() {
         SubCommands::GenerateInstaller => {
             generate_installer();
         }
-        SubCommands::WatchLog => {
-            watch_log();
+        SubCommands::WatchLog(args) => {
+            watch_log(args);
         }
     }
 }

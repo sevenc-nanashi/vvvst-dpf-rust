@@ -120,7 +120,13 @@ static INIT: Once = Once::new();
 impl PluginImpl {
     pub fn new(params: PluginParams) -> Self {
         INIT.call_once(|| {
-            let dest = common::log_dir().join(format!(
+            let log_dir = common::log_dir();
+            if !log_dir.exists() {
+                if fs_err::create_dir_all(&log_dir).is_err() {
+                    return;
+                }
+            }
+            let dest = log_dir.join(format!(
                 "{}-plugin.log",
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)

@@ -182,7 +182,11 @@ async fn main() -> Result<()> {
 }
 
 fn init_log(is_host: bool) -> Result<()> {
-    let log_dest = common::log_dir().join(format!(
+    let log_dir = common::log_dir();
+    if !log_dir.exists() {
+        fs_err::create_dir_all(&log_dir)?;
+    }
+    let log_dest = log_dir.join(format!(
         "{}-engine-manager-{}.log",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -316,16 +320,27 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
                 };
                 if engine_status != previous_engine_status {
                     info!("Engine status changed: {:?}", engine_status);
-                    if let EngineStatus::Running { port } = engine_status {
-                        info!("Sending EnginePort: {}", port);
-                        let mut writer_inner = writer.lock().await;
-                        if let Err(e) = pack(
-                            manager::ToClientMessage::EnginePort(port),
-                            &mut *writer_inner,
-                        )
-                        .await
-                        {
-                            break Err(e);
+                    match engine_status {
+                        EngineStatus::Running { port } => {
+                            info!("Sending EnginePort: {}", port);
+                            let mut writer_inner = writer.lock().await;
+                            if let Err(e) = pack(
+                                manager::ToClientMessage::EnginePort(port),
+                                &mut *writer_inner,
+                            )
+                            .await
+                            {
+                                break Err(e);
+                            }
+                        }
+                        EngineStatus::NotRunning => {
+                            info!("Sending EnginePort: NotRunning");
+                            rfd::AsyncMessageDialog::new()
+                                .set_title("音声合成エンジンエラー")
+                                .set_description("音声合成エンジンが異常終了しました。エンジンを再起動してください。")
+                                .set_buttons(rfd::MessageButtons::Ok)
+                                .show()
+                                .await;
                         }
                     }
                     previous_engine_status = engine_status;
