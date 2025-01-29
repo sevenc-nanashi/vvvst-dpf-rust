@@ -51,4 +51,5 @@ pub enum ToClientMessage {
 pub enum EngineStatus {
     NotRunning,
     Running { port: u16 },
+    Exited { exit_code: i32 },
 }

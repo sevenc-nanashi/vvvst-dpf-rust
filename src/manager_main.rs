@@ -307,8 +307,10 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
             loop {
                 let engine_status = {
                     if let Some(engine_process) = ENGINE_PROCESS.lock().await.as_mut() {
-                        if let Ok(Some(_)) = engine_process.try_wait() {
-                            EngineStatus::NotRunning
+                        if let Ok(Some(code)) = engine_process.try_wait() {
+                            EngineStatus::Exited {
+                                exit_code: code.code().unwrap_or(-1),
+                            }
                         } else {
                             EngineStatus::Running {
                                 port: get_engine_port().await?,
@@ -333,15 +335,19 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
                                 break Err(e);
                             }
                         }
-                        EngineStatus::NotRunning => {
-                            info!("Sending EnginePort: NotRunning");
-                            rfd::AsyncMessageDialog::new()
-                                .set_title("音声合成エンジンエラー")
-                                .set_description("音声合成エンジンが異常終了しました。エンジンを再起動してください。")
-                                .set_buttons(rfd::MessageButtons::Ok)
-                                .show()
-                                .await;
+                        EngineStatus::Exited { exit_code } => {
+                            if exit_code != 0 {
+                                info!("Engine exited with code: {}", exit_code);
+                                rfd::AsyncMessageDialog::new()
+                                    .set_title("音声合成エンジンエラー")
+                                    .set_description("音声合成エンジンが異常終了しました。エンジンを再起動してください。")
+                                    .set_level(rfd::MessageLevel::Error)
+                                    .set_buttons(rfd::MessageButtons::Ok)
+                                    .show()
+                                    .await;
+                            }
                         }
+                        _ => {}
                     }
                     previous_engine_status = engine_status;
                 }
