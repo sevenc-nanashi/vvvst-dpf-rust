@@ -316,14 +316,19 @@ impl PluginImpl {
                         }
                         let current_frame = current_frame as usize;
                         if current_frame < mix.samples_len {
+                            let solo_track_exists =
+                                critical_params.tracks.iter().any(|(_, track)| track.solo);
                             for (track_id, track) in critical_params.tracks.iter() {
+                                if solo_track_exists {
+                                    if !track.solo {
+                                        continue;
+                                    }
+                                } else if track.mute {
+                                    continue;
+                                }
                                 let Some(track_samples) = &samples.get(track_id) else {
                                     continue;
                                 };
-
-                                if current_frame >= track_samples.len() {
-                                    continue;
-                                }
 
                                 let Some(&channel_index) =
                                     critical_params.routing.channel_index.get(track_id)
