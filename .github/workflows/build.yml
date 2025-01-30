@@ -58,11 +58,14 @@ jobs:
           cat ./vvvst/resources/editor_ext/howtouse.md ./public/howtouse.md > ./public/howtouse.md.tmp
           mv ./public/howtouse.md.tmp ./public/howtouse.md
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
-          cache: "npm"
+          cache: "pnpm"
 
       - name: Install dependencies
         run: |
