@@ -174,17 +174,25 @@ impl PluginImpl {
     }
 
     #[instrument]
-    pub async fn update_audio_samples(&self, new_sample_rate: Option<f32>) {
-        let mut mix = self.mix.write().await;
-        mix.samples.clear();
+    pub async fn update_audio_samples(
+        this_ref: Arc<Mutex<PluginImpl>>,
+        new_sample_rate: Option<f32>,
+    ) {
+        let (mix, params) = {
+            let this_ref = this_ref.lock().await;
+            (Arc::clone(&this_ref.mix), Arc::clone(&this_ref.params))
+        };
+        let new_sample_rate = {
+            let mix = mix.read().await;
 
-        let new_sample_rate = new_sample_rate.unwrap_or(mix.sample_rate);
+            new_sample_rate.unwrap_or(mix.sample_rate)
+        };
         if new_sample_rate == 0.0 {
             info!("sample rate is 0, refusing to update mixes");
             return;
         }
 
-        let params = self.params.read().await;
+        let params = params.read().await;
         let phrases = &params.phrases;
         let voices = &params.voices;
 
@@ -200,7 +208,7 @@ impl PluginImpl {
             new_samples.insert(track_id.clone(), vec![0.0; samples_len]);
         }
         for phrase in phrases {
-            if let Some(voice) = voices.get(&phrase.voice) {
+            if let Some(voice) = phrase.voice.as_ref().and_then(|v| voices.get(v)) {
                 let Some(new_samples) = new_samples.get_mut(&phrase.track_id) else {
                     continue;
                 };
@@ -235,6 +243,32 @@ impl PluginImpl {
                     let frame = frame as usize;
                     new_samples[frame] = new_samples[frame].saturating_add(samples[i]);
                 }
+            } else {
+                for note in phrase.notes.iter() {
+                    let start = (note.start * new_sample_rate).floor().max(0.0) as usize;
+                    let end = (note.end * new_sample_rate).floor() as usize;
+                    let mut synth =
+                        crate::synthesizer::SynthVoice::new(new_sample_rate, note.note_number);
+
+                    if let Some(new_samples) = new_samples.get_mut(&phrase.track_id) {
+                        let padded_end =
+                            end + (new_sample_rate * (synth.amplifier.release + 0.1)) as usize + 1;
+                        if padded_end > new_samples.len() {
+                            new_samples.resize(padded_end, 0.0);
+                            if padded_end > samples_len {
+                                samples_len = padded_end;
+                            }
+                        }
+                        let mut frame = start;
+                        while let Some(sample) = synth.process() {
+                            new_samples[frame] = new_samples[frame].saturating_add(sample as f32);
+                            frame += 1;
+                            if frame == end {
+                                synth.note_off();
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -244,6 +278,7 @@ impl PluginImpl {
             samples_len
         );
 
+        let mut mix = mix.write().await;
         mix.samples = new_samples;
         mix.sample_rate = new_sample_rate;
         mix.samples_len = samples_len;
@@ -288,11 +323,7 @@ impl PluginImpl {
                 if mix.sample_rate != sample_rate {
                     let this_ref = Arc::clone(&this_ref);
                     RUNTIME.spawn(async move {
-                        this_ref
-                            .lock()
-                            .await
-                            .update_audio_samples(Some(sample_rate))
-                            .await;
+                        PluginImpl::update_audio_samples(this_ref, Some(sample_rate)).await;
                     });
                     return;
                 }

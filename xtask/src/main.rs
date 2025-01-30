@@ -449,12 +449,12 @@ impl notify::EventHandler for CrossbeamEventHandler {
 
 fn watch_log(args: WatchLogArgs) {
     let logs = if args.release {
+        common::log_dir()
+    } else {
         let main_crate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap();
         main_crate.join("logs")
-    } else {
-        common::log_dir()
     };
     if !logs.exists() {
         panic!("Logs not found at {:?}", logs);

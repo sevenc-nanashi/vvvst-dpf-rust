@@ -99,7 +99,16 @@ pub struct ShowImportFileDialog {
 pub struct Phrase {
     pub start: f32,
     pub track_id: TrackId,
-    pub voice: SingingVoiceKey,
+    pub voice: Option<SingingVoiceKey>,
+    pub notes: Vec<Note>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Note {
+    pub start: f32,
+    pub end: f32,
+    pub note_number: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -440,22 +440,23 @@ impl PluginUiImpl {
                 let missing_voices = phrases
                     .iter()
                     .filter_map(|phrase| {
-                        if voices.contains_key(&phrase.voice) {
-                            None
-                        } else {
-                            Some(phrase.voice.clone())
-                        }
+                        phrase.voice.as_ref().and_then(|voice| {
+                            if voices.contains_key(voice) {
+                                None
+                            } else {
+                                Some(voice.clone())
+                            }
+                        })
                     })
                     .collect::<HashSet<_>>();
                 if missing_voices.is_empty() {
-                    let plugin = Arc::clone(&plugin);
                     tokio::spawn(async move {
-                        plugin.lock().await.update_audio_samples(None).await;
+                        PluginImpl::update_audio_samples(plugin, None).await;
                     });
                 }
                 let used_voices = phrases
                     .iter()
-                    .map(|phrase| phrase.voice.clone())
+                    .filter_map(|phrase| phrase.voice.clone())
                     .collect::<HashSet<_>>();
                 voices.retain(|key, _| used_voices.contains(key));
                 Ok(serde_json::to_value(SetPhraseResult {
@@ -475,7 +476,7 @@ impl PluginUiImpl {
 
                 let plugin = Arc::clone(&plugin);
                 tokio::spawn(async move {
-                    plugin.lock().await.update_audio_samples(None).await;
+                    PluginImpl::update_audio_samples(plugin, None).await;
                 });
                 Ok(serde_json::Value::Null)
             }

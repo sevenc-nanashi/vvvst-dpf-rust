@@ -3,6 +3,7 @@ mod manager;
 mod model;
 mod plugin;
 mod saturating_ext;
+mod synthesizer;
 mod ui;
 mod vst_common;
 
