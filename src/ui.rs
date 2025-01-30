@@ -15,7 +15,7 @@ use tokio::{
     io::AsyncBufReadExt,
     sync::{
         mpsc::{UnboundedReceiver, UnboundedSender},
-        Mutex,
+        Mutex, RwLock,
     },
 };
 use tracing::{error, info, warn};
@@ -49,7 +49,7 @@ pub enum ManagerMessage {
 impl PluginUiImpl {
     pub unsafe fn new(
         handle: usize,
-        plugin: Arc<Mutex<PluginImpl>>,
+        plugin: Arc<RwLock<PluginImpl>>,
         width: usize,
         height: usize,
         scale_factor: f64,
@@ -75,7 +75,7 @@ impl PluginUiImpl {
 
         let (notification_sender, notification_receiver) = tokio::sync::mpsc::unbounded_channel();
         {
-            let mut plugin = plugin.blocking_lock();
+            let mut plugin = plugin.blocking_write();
             plugin.notification_sender = Some(notification_sender.clone());
         }
 
@@ -386,13 +386,13 @@ impl PluginUiImpl {
     }
 
     async fn handle_request(
-        plugin: Arc<Mutex<PluginImpl>>,
+        plugin: Arc<RwLock<PluginImpl>>,
         manager_sender: UnboundedSender<ManagerMessage>,
         zoom_sender: UnboundedSender<f64>,
         request: RequestInner,
     ) -> Result<serde_json::Value> {
         let params = {
-            let plugin = plugin.lock().await;
+            let plugin = plugin.read().await;
             Arc::clone(&plugin.params)
         };
         match request {
@@ -423,9 +423,12 @@ impl PluginUiImpl {
                 Ok(serde_json::Value::Null)
             }
             RequestInner::GetVoices => {
-                let plugin = plugin.lock().await;
+                let plugin = plugin.read().await;
                 let encoded_voices = plugin
-                    .voice_caches
+                    .params
+                    .read()
+                    .await
+                    .voices
                     .iter()
                     .map(|(key, value)| (key.clone(), base64.encode(value)))
                     .collect::<HashMap<_, _>>();
@@ -464,13 +467,19 @@ impl PluginUiImpl {
                 })?)
             }
             RequestInner::SetVoices(voices) => {
+                let voices = voices
+                    .into_iter()
+                    .map(|(key, value)| {
+                        base64
+                            .decode(value)
+                            .map(|value| (key, value))
+                            .map_err(anyhow::Error::from)
+                    })
+                    .collect::<Result<HashMap<_, _>>>()?;
                 {
-                    let mut plugin = plugin.lock().await;
                     let voices_ref = &mut params.write().await.voices;
                     for (audio_hash, voice) in voices {
-                        let decoded = base64.decode(voice)?;
-                        voices_ref.insert(audio_hash.clone(), decoded.clone());
-                        plugin.voice_caches.insert(audio_hash, decoded);
+                        voices_ref.insert(audio_hash, voice);
                     }
                 }
 
@@ -585,10 +594,12 @@ impl PluginUiImpl {
             }
 
             RequestInner::GetCurrentPosition => {
-                let mut plugin = plugin.lock().await;
-                if plugin.current_position_updated {
-                    plugin.current_position_updated = false;
-                    Ok(serde_json::to_value(plugin.current_position)?)
+                let plugin_guard = plugin.read().await;
+                if plugin_guard.current_position_updated {
+                    drop(plugin_guard);
+                    let mut plugin_guard = plugin.write().await;
+                    plugin_guard.current_position_updated = false;
+                    Ok(serde_json::to_value(plugin_guard.current_position)?)
                 } else {
                     Ok(serde_json::Value::Null)
                 }

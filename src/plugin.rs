@@ -17,7 +17,7 @@ use std::{
     io::Write as _,
     sync::{Arc, Once},
 };
-use tokio::sync::{mpsc::UnboundedSender, Mutex, RwLock};
+use tokio::sync::{mpsc::UnboundedSender, RwLock};
 use tracing::{info, instrument};
 
 pub struct PluginImpl {
@@ -25,8 +25,6 @@ pub struct PluginImpl {
 
     pub params: Arc<RwLock<PluginParams>>,
     pub mix: Arc<RwLock<Mixes>>,
-
-    pub voice_caches: HashMap<SingingVoiceKey, Vec<u8>>,
 
     prev_position: i64,
     prev_is_playing: bool,
@@ -154,6 +152,11 @@ impl PluginImpl {
             }));
 
             let _ = tracing_subscriber::fmt()
+                .with_max_level(if cfg!(debug_assertions) {
+                    tracing::Level::DEBUG
+                } else {
+                    tracing::Level::INFO
+                })
                 .with_writer(writer)
                 .with_ansi(false)
                 .try_init();
@@ -163,8 +166,6 @@ impl PluginImpl {
             params: Arc::new(RwLock::new(params)),
             mix: Arc::new(RwLock::new(Mixes::default())),
 
-            voice_caches: HashMap::new(),
-
             prev_position: 0,
             prev_is_playing: false,
 
@@ -173,13 +174,13 @@ impl PluginImpl {
         }
     }
 
-    #[instrument]
+    #[instrument(skip(this_ref))]
     pub async fn update_audio_samples(
-        this_ref: Arc<Mutex<PluginImpl>>,
+        this_ref: Arc<RwLock<PluginImpl>>,
         new_sample_rate: Option<f32>,
     ) {
         let (mix, params) = {
-            let this_ref = this_ref.lock().await;
+            let this_ref = this_ref.read().await;
             (Arc::clone(&this_ref.mix), Arc::clone(&this_ref.params))
         };
         let new_sample_rate = {
@@ -307,7 +308,7 @@ impl PluginImpl {
     }
 
     pub fn run(
-        this_ref: Arc<Mutex<PluginImpl>>,
+        this_ref: Arc<RwLock<PluginImpl>>,
         outputs: &mut [&mut [f32]],
         sample_rate: f32,
         is_playing: bool,
@@ -318,7 +319,7 @@ impl PluginImpl {
                 *sample = 0.0;
             }
         }
-        if let Ok(mut this) = this_ref.try_lock() {
+        if let Ok(this) = this_ref.try_read() {
             if let (Ok(mix), Ok(params)) = (this.mix.try_read(), this.params.try_read()) {
                 if mix.sample_rate != sample_rate {
                     let this_ref = Arc::clone(&this_ref);
@@ -388,19 +389,24 @@ impl PluginImpl {
                 }
             }
 
-            if this.prev_position != current_sample {
-                this.prev_position = current_sample;
-                this.current_position = (current_sample as f32 / sample_rate).max(0.0);
-                this.current_position_updated = true;
-            }
-            if this.prev_is_playing != is_playing {
-                this.prev_is_playing = is_playing;
-                if let Some(sender) = &this.notification_sender {
-                    if sender
-                        .send(UiNotification::UpdatePlayingState(is_playing))
-                        .is_err()
-                    {
-                        this.notification_sender = None;
+            if (this.prev_position, this.prev_is_playing) != (current_sample, is_playing) {
+                drop(this);
+                if let Ok(mut this) = this_ref.try_write() {
+                    if this.prev_position != current_sample {
+                        this.prev_position = current_sample;
+                        this.current_position = (current_sample as f32 / sample_rate).max(0.0);
+                        this.current_position_updated = true;
+                    }
+                    if this.prev_is_playing != is_playing {
+                        this.prev_is_playing = is_playing;
+                        if let Some(sender) = &this.notification_sender {
+                            if sender
+                                .send(UiNotification::UpdatePlayingState(is_playing))
+                                .is_err()
+                            {
+                                this.notification_sender = None;
+                            }
+                        }
                     }
                 }
             }

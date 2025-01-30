@@ -8,12 +8,12 @@ mod ui;
 mod vst_common;
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info};
 use vst_common::NUM_CHANNELS;
 
 pub struct Plugin {
-    inner: Arc<Mutex<plugin::PluginImpl>>,
+    inner: Arc<RwLock<plugin::PluginImpl>>,
 }
 
 pub struct PluginUi {
@@ -67,20 +67,20 @@ unsafe extern "C-unwind" fn cstring_drop(s: *mut std::os::raw::c_char) {
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_new() -> *mut Plugin {
     Box::into_raw(Box::new(Plugin {
-        inner: Arc::new(Mutex::new(plugin::PluginImpl::new(Default::default()))),
+        inner: Arc::new(RwLock::new(plugin::PluginImpl::new(Default::default()))),
     }))
 }
 
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_set_state(plugin: &Plugin, state: *const std::ffi::c_char) {
-    let plugin = plugin.inner.blocking_lock();
+    let plugin = plugin.inner.blocking_read();
     let state = std::ffi::CStr::from_ptr(state).to_str().unwrap();
     let _ = plugin.set_state(state);
 }
 
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_get_state(plugin: &Plugin) -> *mut std::os::raw::c_char {
-    let plugin = plugin.inner.blocking_lock();
+    let plugin = plugin.inner.blocking_read();
     let state = plugin.get_state();
     let state = std::ffi::CString::new(state).unwrap();
     state.into_raw()
