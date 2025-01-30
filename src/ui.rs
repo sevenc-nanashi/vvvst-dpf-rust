@@ -391,9 +391,9 @@ impl PluginUiImpl {
         zoom_sender: UnboundedSender<f64>,
         request: RequestInner,
     ) -> Result<serde_json::Value> {
-        let params = {
+        let (params, critical_params) = {
             let plugin = plugin.read().await;
-            Arc::clone(&plugin.params)
+            (Arc::clone(&plugin.params), Arc::clone(&plugin.critical_params))
         };
         match request {
             RequestInner::GetVersion => Ok(serde_json::to_value(env!("CARGO_PKG_VERSION"))?),
@@ -479,7 +479,7 @@ impl PluginUiImpl {
                 {
                     let voices_ref = &mut params.write().await.voices;
                     for (audio_hash, voice) in voices {
-                        voices_ref.insert(audio_hash, voice);
+                        voices_ref.insert(audio_hash, voice.into());
                     }
                 }
 
@@ -568,18 +568,18 @@ impl PluginUiImpl {
             }
 
             RequestInner::GetRouting => {
-                let routing = params.read().await.routing.clone();
+                let routing = critical_params.read().await.routing.clone();
                 Ok(serde_json::to_value(routing)?)
             }
 
             RequestInner::SetRouting(routing) => {
-                let mut params = params.write().await;
+                let mut params = critical_params.write().await;
                 params.routing = routing.clone();
                 Ok(serde_json::Value::Null)
             }
 
             RequestInner::SetTracks(tracks) => {
-                let mut params = params.write().await;
+                let mut params = critical_params.write().await;
                 params.tracks = tracks.clone();
                 let mut new_channel_index = params.routing.channel_index.clone();
                 new_channel_index.retain(|track_id, _index| tracks.contains_key(&track_id));

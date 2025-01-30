@@ -7,11 +7,7 @@ use crate::{
 };
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
-use serde::{
-    de::{MapAccess, Visitor},
-    ser::SerializeMap,
-    Deserialize, Deserializer, Serialize, Serializer,
-};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     io::Write as _,
@@ -24,6 +20,7 @@ pub struct PluginImpl {
     pub notification_sender: Option<UnboundedSender<UiNotification>>,
 
     pub params: Arc<RwLock<PluginParams>>,
+    pub critical_params: Arc<RwLock<CriticalPluginParams>>,
     pub mix: Arc<RwLock<Mixes>>,
 
     prev_position: i64,
@@ -53,70 +50,33 @@ impl Default for Mixes {
     }
 }
 
+/// 再生に不要なパラメータ。
 #[derive(Clone, Serialize, Deserialize, Default)]
 pub struct PluginParams {
     pub project: Option<String>,
     pub phrases: Vec<Phrase>,
+
+    pub voices: HashMap<SingingVoiceKey, serde_bytes::ByteBuf>,
+}
+
+/// 再生時に必要なパラメータ。可能な限りwriteロックを取る時間は短くすること。
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub struct CriticalPluginParams {
     pub tracks: HashMap<TrackId, Track>,
     pub routing: Routing,
-
-    #[serde(
-        serialize_with = "serialize_voices",
-        deserialize_with = "deserialize_voices"
-    )]
-    pub voices: HashMap<SingingVoiceKey, Vec<u8>>,
 }
 
-// https://github.com/serde-rs/serde/issues/2554#issuecomment-1666887206
-fn serialize_voices<S>(
-    voices: &HashMap<SingingVoiceKey, Vec<u8>>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    let mut map = serializer.serialize_map(Some(voices.len()))?;
-    for (key, bytes) in voices {
-        let value = serde_bytes::ByteBuf::from(bytes.to_owned());
-        map.serialize_entry(&key.0, &value)?;
-    }
-    map.end()
-}
-
-fn deserialize_voices<'de, D>(
-    deserializer: D,
-) -> Result<HashMap<SingingVoiceKey, Vec<u8>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    struct VoicesVisitor;
-
-    impl<'de> Visitor<'de> for VoicesVisitor {
-        type Value = HashMap<SingingVoiceKey, Vec<u8>>;
-        fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
-        where
-            M: MapAccess<'de>,
-        {
-            let mut generic_tags = HashMap::new();
-            while let Some(key) = map.next_key::<String>()? {
-                let value = map.next_value::<serde_bytes::ByteBuf>()?;
-                generic_tags.insert(SingingVoiceKey(key), value.into_vec());
-            }
-            Ok(generic_tags)
-        }
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("a map")
-        }
-    }
-
-    deserializer.deserialize_map(VoicesVisitor)
+/// VSTに保存する用のパラメータ。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct State {
+    pub params: serde_bytes::ByteBuf,
+    pub critical_params: serde_bytes::ByteBuf,
 }
 
 static INIT: Once = Once::new();
 
 impl PluginImpl {
-    pub fn new(params: PluginParams) -> Self {
+    pub fn new(params: PluginParams, critical_params: CriticalPluginParams) -> Self {
         INIT.call_once(|| {
             let log_dir = common::log_dir();
             if !log_dir.exists() {
@@ -164,6 +124,7 @@ impl PluginImpl {
         PluginImpl {
             notification_sender: None,
             params: Arc::new(RwLock::new(params)),
+            critical_params: Arc::new(RwLock::new(critical_params)),
             mix: Arc::new(RwLock::new(Mixes::default())),
 
             prev_position: 0,
@@ -179,9 +140,13 @@ impl PluginImpl {
         this_ref: Arc<RwLock<PluginImpl>>,
         new_sample_rate: Option<f32>,
     ) {
-        let (mix, params) = {
+        let (mix, params, critical_params) = {
             let this_ref = this_ref.read().await;
-            (Arc::clone(&this_ref.mix), Arc::clone(&this_ref.params))
+            (
+                Arc::clone(&this_ref.mix),
+                Arc::clone(&this_ref.params),
+                Arc::clone(&this_ref.critical_params),
+            )
         };
         let new_sample_rate = {
             let mix = mix.read().await;
@@ -205,15 +170,18 @@ impl PluginImpl {
             .fold(0.0, f32::max);
         let mut new_samples = HashMap::new();
         let mut samples_len = (max_start * new_sample_rate) as usize;
-        for track_id in params.tracks.keys() {
+        let critical_params = critical_params.read().await;
+        for track_id in critical_params.tracks.keys() {
             new_samples.insert(track_id.clone(), vec![0.0; samples_len]);
         }
+        drop(critical_params);
+
         for phrase in phrases {
             if let Some(voice) = phrase.voice.as_ref().and_then(|v| voices.get(v)) {
                 let Some(new_samples) = new_samples.get_mut(&phrase.track_id) else {
                     continue;
                 };
-                let mut wav = wav_io::reader::Reader::from_vec(voice.clone()).unwrap();
+                let mut wav = wav_io::reader::Reader::from_vec(voice.to_vec()).unwrap();
                 let header = wav.read_header().unwrap();
                 let base_samples = wav.get_samples_f32().unwrap();
                 let samples = if header.channels == 1 {
@@ -290,21 +258,27 @@ impl PluginImpl {
         if state_base64.is_empty() {
             return Ok(());
         }
-        let mut params = self.params.blocking_write();
         let state_compressed = base64.decode(state_base64)?;
         let state = zstd::decode_all(state_compressed.as_slice())?;
-        let loaded_params = bincode::deserialize(&state)?;
-        *params = loaded_params;
+        let state: State = bincode::deserialize(&state)?;
+        let mut params = self.params.blocking_write();
+        let mut critical_params = self.critical_params.blocking_write();
+        *params = bincode::deserialize(&state.params)?;
+        *critical_params = bincode::deserialize(&state.critical_params)?;
 
         Ok(())
     }
 
-    pub fn get_state(&self) -> String {
-        let params = { self.params.blocking_read().clone() };
-        let state = bincode::serialize(&params).unwrap();
-        // 22以降は時間がかかるわりにそれほど効果が無いので3で固定する
+    pub fn get_state(&self) -> Result<String> {
+        let params = self.params.blocking_read();
+        let critical_params = self.critical_params.blocking_read();
+        let state = bincode::serialize(&State {
+            params: bincode::serialize(&*params)?.into(),
+            critical_params: bincode::serialize(&*critical_params)?.into(),
+        })?;
+        // 4以降は時間がかかるわりにそれほど効果が無いので3で固定する
         let state_compressed = zstd::encode_all(state.as_slice(), 3).unwrap();
-        base64.encode(state_compressed.as_slice())
+        Ok(base64.encode(state_compressed.as_slice()))
     }
 
     pub fn run(
@@ -320,7 +294,9 @@ impl PluginImpl {
             }
         }
         if let Ok(this) = this_ref.try_read() {
-            if let (Ok(mix), Ok(params)) = (this.mix.try_read(), this.params.try_read()) {
+            if let (Ok(mix), Ok(critical_params)) =
+                (this.mix.try_read(), this.critical_params.try_read())
+            {
                 if mix.sample_rate != sample_rate {
                     let this_ref = Arc::clone(&this_ref);
                     RUNTIME.spawn(async move {
@@ -340,7 +316,7 @@ impl PluginImpl {
                         }
                         let current_frame = current_frame as usize;
                         if current_frame < mix.samples_len {
-                            for (track_id, track) in params.tracks.iter() {
+                            for (track_id, track) in critical_params.tracks.iter() {
                                 let Some(track_samples) = &samples.get(track_id) else {
                                     continue;
                                 };
@@ -350,12 +326,12 @@ impl PluginImpl {
                                 }
 
                                 let Some(&channel_index) =
-                                    params.routing.channel_index.get(track_id)
+                                    critical_params.routing.channel_index.get(track_id)
                                 else {
                                     continue;
                                 };
                                 let channel_index = channel_index as usize;
-                                match params.routing.channel_mode {
+                                match critical_params.routing.channel_mode {
                                     ChannelMode::Mono => {
                                         outputs[channel_index][i] = outputs[channel_index][i]
                                             .saturating_add(

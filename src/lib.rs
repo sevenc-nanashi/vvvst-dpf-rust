@@ -67,7 +67,10 @@ unsafe extern "C-unwind" fn cstring_drop(s: *mut std::os::raw::c_char) {
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_new() -> *mut Plugin {
     Box::into_raw(Box::new(Plugin {
-        inner: Arc::new(RwLock::new(plugin::PluginImpl::new(Default::default()))),
+        inner: Arc::new(RwLock::new(plugin::PluginImpl::new(
+            Default::default(),
+            Default::default(),
+        ))),
     }))
 }
 
@@ -81,7 +84,7 @@ unsafe extern "C-unwind" fn plugin_set_state(plugin: &Plugin, state: *const std:
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_get_state(plugin: &Plugin) -> *mut std::os::raw::c_char {
     let plugin = plugin.inner.blocking_read();
-    let state = plugin.get_state();
+    let state = plugin.get_state().unwrap();
     let state = std::ffi::CString::new(state).unwrap();
     state.into_raw()
 }
