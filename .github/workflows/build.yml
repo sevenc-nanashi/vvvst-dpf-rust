@@ -36,7 +36,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: VOICEVOX/voicevox_resource
-          ref: "0.20.0"
+          ref: "0.22.2"
           path: resource
 
       - name: Create and replace software resources
@@ -69,16 +69,16 @@ jobs:
 
       - name: Install dependencies
         run: |
-          npm install
+          pnpm install
 
       - name: Generate public/licenses.json
         run: |
-          npm run license:generate -- -o editor_licenses.json
-          npm run license:merge -- -o public/licenses.json -i editor_licenses.json -i vvvst/resources/editor_ext/licenses.generated.json
+          pnpm run license:generate -o editor_licenses.json
+          pnpm run license:merge -o public/licenses.json -i editor_licenses.json -i vvvst/resources/editor_ext/licenses.generated.json
 
       - name: Build
         run: |
-          npm run vst:build
+          pnpm run vst:build
 
       - name: Upload
         uses: actions/upload-artifact@v4
