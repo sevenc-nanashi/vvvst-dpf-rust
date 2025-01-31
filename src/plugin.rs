@@ -7,14 +7,16 @@ use crate::{
 };
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
+use itertools::Itertools;
+use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::Write as _,
     sync::{Arc, Once},
 };
-use tokio::sync::{mpsc::UnboundedSender, RwLock};
-use tracing::{info, instrument};
+use tokio::sync::{mpsc::UnboundedSender, Mutex, RwLock};
+use tracing::{debug, info, instrument};
 
 pub struct PluginImpl {
     pub notification_sender: Option<UnboundedSender<UiNotification>>,
@@ -39,6 +41,7 @@ pub struct Mixes {
     pub samples: HashMap<TrackId, Vec<f32>>,
     pub sample_rate: f32,
     pub samples_len: usize,
+    pub source: HashSet<Phrase>,
 }
 impl Default for Mixes {
     fn default() -> Self {
@@ -46,6 +49,7 @@ impl Default for Mixes {
             samples: HashMap::new(),
             sample_rate: 0.0,
             samples_len: 0,
+            source: HashSet::new(),
         }
     }
 }
@@ -54,9 +58,79 @@ impl Default for Mixes {
 #[derive(Clone, Serialize, Deserialize, Default)]
 pub struct PluginParams {
     pub project: Option<String>,
-    pub phrases: Vec<Phrase>,
+    pub phrases: HashSet<Phrase>,
 
-    pub voices: HashMap<SingingVoiceKey, serde_bytes::ByteBuf>,
+    pub voices: HashMap<SingingVoiceKey, Voice>,
+}
+
+pub struct Voice {
+    pub bytes: Vec<u8>,
+    pub sample_rate: f32,
+    pub samples_len: usize,
+}
+impl Serialize for Voice {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(&self.to_vec())
+    }
+}
+impl<'de> Deserialize<'de> for Voice {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
+        Ok(Voice::new(bytes.to_vec()).map_err(serde::de::Error::custom)?)
+    }
+}
+impl std::fmt::Debug for Voice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Voice").finish()
+    }
+}
+impl Clone for Voice {
+    fn clone(&self) -> Self {
+        Voice::new(self.to_vec()).unwrap()
+    }
+}
+impl Voice {
+    pub fn new(bytes: Vec<u8>) -> Result<Self> {
+        let mut reader =
+            wav_io::reader::Reader::from_vec(bytes.clone()).map_err(anyhow::Error::msg)?;
+        let header = reader.read_header().map_err(anyhow::Error::msg)?;
+        let samples_len = reader.get_samples_f32().map_err(anyhow::Error::msg)?.len();
+
+        Ok(Voice {
+            bytes,
+            sample_rate: header.sample_rate as f32,
+            samples_len,
+        })
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.bytes.clone()
+    }
+
+    pub fn duration(&self) -> f32 {
+        (self.samples_len as f32) / (self.sample_rate as f32)
+    }
+
+    pub fn reader(&self) -> wav_io::reader::Reader {
+        wav_io::reader::Reader::from_vec(self.bytes.clone())
+            .expect("unreachable: bytes are validated in constructor")
+    }
+}
+
+impl Phrase {
+    pub fn duration(&self, voices: &HashMap<SingingVoiceKey, Voice>) -> f32 {
+        if let Some(voice) = self.voice.as_ref().and_then(|v| voices.get(v)) {
+            voice.duration()
+        } else {
+            (self
+                .notes
+                .iter()
+                .map(|note| note.end)
+                .fold(0.0.into(), OrderedFloat::<f32>::max)
+                - self.start)
+                .0
+        }
+    }
 }
 
 /// 再生時に必要なパラメータ。可能な限りwriteロックを取る時間は短くすること。
@@ -137,23 +211,26 @@ impl PluginImpl {
 
     #[instrument(skip(this_ref))]
     pub async fn update_audio_samples(
-        this_ref: Arc<RwLock<PluginImpl>>,
+        this_ref: Arc<Mutex<PluginImpl>>,
         new_sample_rate: Option<f32>,
     ) {
         let (mix, params, critical_params) = {
-            let this_ref = this_ref.read().await;
+            let this_ref = this_ref.lock().await;
             (
                 Arc::clone(&this_ref.mix),
                 Arc::clone(&this_ref.params),
                 Arc::clone(&this_ref.critical_params),
             )
         };
-        let new_sample_rate = {
+        let (sample_rate, sample_rate_changed) = {
             let mix = mix.read().await;
 
-            new_sample_rate.unwrap_or(mix.sample_rate)
+            (
+                new_sample_rate.unwrap_or(mix.sample_rate),
+                new_sample_rate != Some(mix.sample_rate),
+            )
         };
-        if new_sample_rate == 0.0 {
+        if sample_rate == 0.0 {
             info!("sample rate is 0, refusing to update mixes");
             return;
         }
@@ -162,26 +239,108 @@ impl PluginImpl {
         let phrases = &params.phrases;
         let voices = &params.voices;
 
-        info!("updating mixes using {} phrases", phrases.len());
+        let (mix_source, mix_samples_len) = {
+            let mix = mix.read().await;
+            (mix.source.clone(), mix.samples_len)
+        };
 
         let max_start = phrases
             .iter()
             .map(|phrase| phrase.start)
-            .fold(0.0, f32::max);
+            .fold(0.0.into(), OrderedFloat::<f32>::max);
         let mut new_samples = HashMap::new();
-        let mut samples_len = (max_start * new_sample_rate) as usize;
-        let critical_params = critical_params.read().await;
-        for track_id in critical_params.tracks.keys() {
+        let mut samples_len = ((max_start * sample_rate).0 as usize).max(mix_samples_len);
+
+        let track_ids = {
+            critical_params
+                .read()
+                .await
+                .tracks
+                .keys()
+                .cloned()
+                .collect::<HashSet<_>>()
+        };
+
+        let added_phrases = phrases
+            .iter()
+            .filter(|phrase| !mix_source.contains(phrase))
+            .collect::<HashSet<_>>();
+        let removed_phrases = mix_source
+            .iter()
+            .filter(|phrase| !phrases.contains(phrase))
+            .collect::<HashSet<_>>();
+
+        if added_phrases.is_empty() && removed_phrases.is_empty() {
+            if sample_rate_changed {
+                let mut mix = mix.write().await;
+                mix.sample_rate = sample_rate;
+            }
+            debug!("no phrases added or removed, skipping mix update");
+            return;
+        }
+
+        info!(
+            "updating mixes using {} phrases ({} added, {} removed)",
+            phrases.len(),
+            added_phrases.len(),
+            removed_phrases.len()
+        );
+
+        static FRAMES_PER_SECTION: usize = 32768;
+
+        let mut updated_sections = track_ids
+            .iter()
+            .map(|id| {
+                (
+                    id.clone(),
+                    vec![false; samples_len / FRAMES_PER_SECTION + 1],
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        for phrase in added_phrases.iter().chain(removed_phrases.iter()) {
+            let updated_sections = updated_sections.entry(phrase.track_id.clone()).or_default();
+            let start = (phrase.start * sample_rate).floor() as usize;
+
+            let end = start + (phrase.duration(voices) * sample_rate as f32) as usize;
+            let start_section = start / FRAMES_PER_SECTION;
+            let end_section = end / FRAMES_PER_SECTION;
+            if samples_len < end {
+                samples_len = end;
+            }
+            if end_section >= updated_sections.len() {
+                updated_sections.resize(end_section + 1, false);
+            }
+            for section in start_section..=end_section {
+                updated_sections[section] = true;
+            }
+        }
+
+        for track_id in track_ids {
             new_samples.insert(track_id.clone(), vec![0.0; samples_len]);
         }
-        drop(critical_params);
 
+        let mut computed_phrases = 0;
         for phrase in phrases {
+            let start = (phrase.start * sample_rate).floor() as usize;
+            let end = start + (phrase.duration(voices) * sample_rate as f32) as usize;
+            let start_section = start / FRAMES_PER_SECTION;
+            let end_section = end / FRAMES_PER_SECTION;
+            let mut updated = false;
+            for section in start_section..=end_section {
+                if updated_sections[&phrase.track_id][section] {
+                    updated = true;
+                    break;
+                }
+            }
+            if !updated {
+                continue;
+            }
+            computed_phrases += 1;
             if let Some(voice) = phrase.voice.as_ref().and_then(|v| voices.get(v)) {
                 let Some(new_samples) = new_samples.get_mut(&phrase.track_id) else {
                     continue;
                 };
-                let mut wav = wav_io::reader::Reader::from_vec(voice.to_vec()).unwrap();
+                let mut wav = voice.reader();
                 let header = wav.read_header().unwrap();
                 let base_samples = wav.get_samples_f32().unwrap();
                 let samples = if header.channels == 1 {
@@ -189,13 +348,9 @@ impl PluginImpl {
                 } else {
                     wav_io::utils::stereo_to_mono(base_samples)
                 };
-                let samples = wav_io::resample::linear(
-                    samples,
-                    1,
-                    header.sample_rate,
-                    (new_sample_rate) as u32,
-                );
-                let start = (phrase.start * new_sample_rate).floor() as isize;
+                let samples =
+                    wav_io::resample::linear(samples, 1, header.sample_rate, (sample_rate) as u32);
+                let start = (phrase.start * sample_rate).floor() as isize;
                 let end = start + samples.len() as isize;
 
                 if end > new_samples.len() as isize {
@@ -214,14 +369,14 @@ impl PluginImpl {
                 }
             } else {
                 for note in phrase.notes.iter() {
-                    let start = (note.start * new_sample_rate).floor().max(0.0) as usize;
-                    let end = (note.end * new_sample_rate).floor() as usize;
+                    let start = (note.start * sample_rate).floor().max(0.0) as usize;
+                    let end = (note.end * sample_rate).floor() as usize;
                     let mut synth =
-                        crate::synthesizer::SynthVoice::new(new_sample_rate, note.note_number);
+                        crate::synthesizer::SynthVoice::new(sample_rate, note.note_number);
 
                     if let Some(new_samples) = new_samples.get_mut(&phrase.track_id) {
                         let padded_end =
-                            end + (new_sample_rate * (synth.amplifier.release + 0.1)) as usize + 1;
+                            end + (sample_rate * (crate::synthesizer::RELEASE + 0.1)) as usize + 1;
                         if padded_end > new_samples.len() {
                             new_samples.resize(padded_end, 0.0);
                             if padded_end > samples_len {
@@ -241,16 +396,50 @@ impl PluginImpl {
             }
         }
 
-        info!(
-            "mixes updated, {} tracks, {} samples",
-            new_samples.len(),
-            samples_len
-        );
+        let num_updated_sections = updated_sections
+            .iter()
+            .map(|(_, v)| v.iter().filter(|&&b| b).count())
+            .sum::<usize>();
 
         let mut mix = mix.write().await;
-        mix.samples = new_samples;
-        mix.sample_rate = new_sample_rate;
+        let mut copies = 0;
+        for (track_id, updated_sections) in updated_sections {
+            let mix_samples = mix
+                .samples
+                .entry(track_id.clone())
+                .or_insert_with(|| vec![0.0; samples_len]);
+            if mix_samples.len() < samples_len {
+                mix_samples.resize(samples_len, 0.0);
+            }
+            let mut current_frame = 0;
+            for (sections, is_updated) in updated_sections.iter().dedup_with_count() {
+                let start = current_frame;
+                current_frame += sections * FRAMES_PER_SECTION;
+                let end = current_frame;
+                if !is_updated {
+                    continue;
+                }
+                let end = end.min(mix_samples.len() - 1);
+                if start >= end {
+                    continue;
+                }
+                copies += 1;
+                let new_samples = new_samples.get(&track_id).unwrap();
+                mix_samples[start..end].copy_from_slice(&new_samples[start..end]);
+            }
+        }
+        mix.sample_rate = sample_rate;
         mix.samples_len = samples_len;
+        mix.source = phrases.clone();
+        drop(mix);
+
+        info!(
+            "mixes updated, {} sections updated using {} phrases, {} copies, {} frames",
+            num_updated_sections,
+            computed_phrases,
+            copies,
+            FRAMES_PER_SECTION * num_updated_sections
+        );
     }
 
     // NOTE: DPFはバイナリ文字列を扱えないので、base64エンコードを挟む
@@ -282,7 +471,7 @@ impl PluginImpl {
     }
 
     pub fn run(
-        this_ref: Arc<RwLock<PluginImpl>>,
+        this_ref: Arc<Mutex<PluginImpl>>,
         outputs: &mut [&mut [f32]],
         sample_rate: f32,
         is_playing: bool,
@@ -293,7 +482,7 @@ impl PluginImpl {
                 *sample = 0.0;
             }
         }
-        if let Ok(this) = this_ref.try_read() {
+        if let Ok(mut this) = this_ref.try_lock() {
             if let (Ok(mix), Ok(critical_params)) =
                 (this.mix.try_read(), this.critical_params.try_read())
             {
@@ -371,22 +560,19 @@ impl PluginImpl {
             }
 
             if (this.prev_position, this.prev_is_playing) != (current_sample, is_playing) {
-                drop(this);
-                if let Ok(mut this) = this_ref.try_write() {
-                    if this.prev_position != current_sample {
-                        this.prev_position = current_sample;
-                        this.current_position = (current_sample as f32 / sample_rate).max(0.0);
-                        this.current_position_updated = true;
-                    }
-                    if this.prev_is_playing != is_playing {
-                        this.prev_is_playing = is_playing;
-                        if let Some(sender) = &this.notification_sender {
-                            if sender
-                                .send(UiNotification::UpdatePlayingState(is_playing))
-                                .is_err()
-                            {
-                                this.notification_sender = None;
-                            }
+                if this.prev_position != current_sample {
+                    this.prev_position = current_sample;
+                    this.current_position = (current_sample as f32 / sample_rate).max(0.0);
+                    this.current_position_updated = true;
+                }
+                if this.prev_is_playing != is_playing {
+                    this.prev_is_playing = is_playing;
+                    if let Some(sender) = &this.notification_sender {
+                        if sender
+                            .send(UiNotification::UpdatePlayingState(is_playing))
+                            .is_err()
+                        {
+                            this.notification_sender = None;
                         }
                     }
                 }

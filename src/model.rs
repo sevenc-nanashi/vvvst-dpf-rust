@@ -1,3 +1,4 @@
+use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -94,20 +95,20 @@ pub struct ShowImportFileDialog {
     pub filters: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Phrase {
-    pub start: f32,
+    pub start: OrderedFloat<f32>,
     pub track_id: TrackId,
     pub voice: Option<SingingVoiceKey>,
     pub notes: Vec<Note>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Note {
-    pub start: f32,
-    pub end: f32,
+    pub start: OrderedFloat<f32>,
+    pub end: OrderedFloat<f32>,
     pub note_number: u8,
 }
 

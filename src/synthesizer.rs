@@ -119,6 +119,11 @@ enum State {
     NoteOff,
 }
 
+pub static ATTACK: f32 = 0.001;
+pub static DECAY: f32 = 0.18;
+pub static SUSTAIN: f32 = 0.5;
+pub static RELEASE: f32 = 0.02;
+
 impl Amplifier {
     fn new(sample_rate: f32, attack: f32, decay: f32, sustain: f32, release: f32) -> Self {
         if attack < 0.001 || decay < 0.001 || sustain < 0.0 || sustain > 1.0 || release < 0.001 {
@@ -202,10 +207,6 @@ impl SynthVoice {
         let cutoff = 2500.0;
         let q = 1.0 / 2.0_f32.sqrt();
         let key_track = 0.25;
-        let attack = 0.001;
-        let decay = 0.18;
-        let sustain = 0.5;
-        let release = 0.02;
         let volume = 0.1;
 
         let frequency = 440.0 * 2.0_f32.powf((note_number as f32 - 69.0) / 12.0);
@@ -215,7 +216,7 @@ impl SynthVoice {
         Self {
             oscillator: SquareOscillator::new(sample_rate, frequency),
             low_pass_filter: LowPassFilter::new(sample_rate, filter_freq, q),
-            amplifier: Amplifier::new(sample_rate, attack, decay, sustain, release),
+            amplifier: Amplifier::new(sample_rate, ATTACK, DECAY, SUSTAIN, RELEASE),
             frames: 0,
             end_frame: None,
             sample_rate,
