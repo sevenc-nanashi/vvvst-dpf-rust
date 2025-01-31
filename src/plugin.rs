@@ -1,7 +1,8 @@
 use crate::{
     common,
-    model::{ChannelMode, Phrase, Routing, SingingVoiceKey, Track, TrackId},
+    ipc_model::ChannelMode,
     saturating_ext::SaturatingMath,
+    state::{deserialize_state, serialize_state, CriticalPluginParams, Mixes, PluginParams},
     ui::UiNotification,
     vst_common::RUNTIME,
 };
@@ -9,7 +10,6 @@ use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     io::Write as _,
@@ -35,116 +35,6 @@ impl std::fmt::Debug for PluginImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PluginImpl").finish()
     }
-}
-
-pub struct Mixes {
-    pub samples: HashMap<TrackId, Vec<f32>>,
-    pub sample_rate: f32,
-    pub samples_len: usize,
-    pub source: HashSet<Phrase>,
-}
-impl Default for Mixes {
-    fn default() -> Self {
-        Mixes {
-            samples: HashMap::new(),
-            sample_rate: 0.0,
-            samples_len: 0,
-            source: HashSet::new(),
-        }
-    }
-}
-
-/// 再生に不要なパラメータ。
-#[derive(Clone, Serialize, Deserialize, Default)]
-pub struct PluginParams {
-    pub project: Option<String>,
-    pub phrases: HashSet<Phrase>,
-
-    pub voices: HashMap<SingingVoiceKey, Voice>,
-}
-
-pub struct Voice {
-    pub bytes: Vec<u8>,
-    pub sample_rate: f32,
-    pub samples_len: usize,
-}
-impl Serialize for Voice {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(&self.to_vec())
-    }
-}
-impl<'de> Deserialize<'de> for Voice {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
-        Ok(Voice::new(bytes.to_vec()).map_err(serde::de::Error::custom)?)
-    }
-}
-impl std::fmt::Debug for Voice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Voice").finish()
-    }
-}
-impl Clone for Voice {
-    fn clone(&self) -> Self {
-        Voice::new(self.to_vec()).unwrap()
-    }
-}
-impl Voice {
-    pub fn new(bytes: Vec<u8>) -> Result<Self> {
-        let mut reader =
-            wav_io::reader::Reader::from_vec(bytes.clone()).map_err(anyhow::Error::msg)?;
-        let header = reader.read_header().map_err(anyhow::Error::msg)?;
-        let samples_len = reader.get_samples_f32().map_err(anyhow::Error::msg)?.len();
-
-        Ok(Voice {
-            bytes,
-            sample_rate: header.sample_rate as f32,
-            samples_len,
-        })
-    }
-
-    pub fn to_vec(&self) -> Vec<u8> {
-        self.bytes.clone()
-    }
-
-    pub fn duration(&self) -> f32 {
-        (self.samples_len as f32) / (self.sample_rate as f32)
-    }
-
-    pub fn reader(&self) -> wav_io::reader::Reader {
-        wav_io::reader::Reader::from_vec(self.bytes.clone())
-            .expect("unreachable: bytes are validated in constructor")
-    }
-}
-
-impl Phrase {
-    pub fn duration(&self, voices: &HashMap<SingingVoiceKey, Voice>) -> f32 {
-        if let Some(voice) = self.voice.as_ref().and_then(|v| voices.get(v)) {
-            voice.duration()
-        } else {
-            (self
-                .notes
-                .iter()
-                .map(|note| note.end)
-                .fold(0.0.into(), OrderedFloat::<f32>::max)
-                - self.start)
-                .0
-        }
-    }
-}
-
-/// 再生時に必要なパラメータ。可能な限りwriteロックを取る時間は短くすること。
-#[derive(Clone, Serialize, Deserialize, Default)]
-pub struct CriticalPluginParams {
-    pub tracks: HashMap<TrackId, Track>,
-    pub routing: Routing,
-}
-
-/// VSTに保存する用のパラメータ。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct State {
-    pub params: serde_bytes::ByteBuf,
-    pub critical_params: serde_bytes::ByteBuf,
 }
 
 static INIT: Once = Once::new();
@@ -448,12 +338,11 @@ impl PluginImpl {
             return Ok(());
         }
         let state_compressed = base64.decode(state_base64)?;
-        let state = zstd::decode_all(state_compressed.as_slice())?;
-        let state: State = bincode::deserialize(&state)?;
+        let (state_params, state_critical_params) = deserialize_state(&state_compressed)?;
         let mut params = self.params.blocking_write();
         let mut critical_params = self.critical_params.blocking_write();
-        *params = bincode::deserialize(&state.params)?;
-        *critical_params = bincode::deserialize(&state.critical_params)?;
+        *params = state_params;
+        *critical_params = state_critical_params;
 
         Ok(())
     }
@@ -461,13 +350,10 @@ impl PluginImpl {
     pub fn get_state(&self) -> Result<String> {
         let params = self.params.blocking_read();
         let critical_params = self.critical_params.blocking_read();
-        let state = bincode::serialize(&State {
-            params: bincode::serialize(&*params)?.into(),
-            critical_params: bincode::serialize(&*critical_params)?.into(),
-        })?;
-        // 4以降は時間がかかるわりにそれほど効果が無いので3で固定する
-        let state_compressed = zstd::encode_all(state.as_slice(), 3).unwrap();
-        Ok(base64.encode(state_compressed.as_slice()))
+        let state = serialize_state(&params, &critical_params)?;
+        drop(params);
+        drop(critical_params);
+        Ok(base64.encode(state.as_slice()))
     }
 
     pub fn run(

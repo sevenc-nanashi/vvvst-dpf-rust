@@ -1,4 +1,4 @@
-use crate::{common, manager, model::*, plugin::{PluginImpl, Voice}, vst_common::RUNTIME};
+use crate::{common, ipc_model::*, manager, plugin::PluginImpl, voice::Voice, vst_common::RUNTIME};
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -393,7 +393,10 @@ impl PluginUiImpl {
     ) -> Result<serde_json::Value> {
         let (params, critical_params) = {
             let plugin = plugin.lock().await;
-            (Arc::clone(&plugin.params), Arc::clone(&plugin.critical_params))
+            (
+                Arc::clone(&plugin.params),
+                Arc::clone(&plugin.critical_params),
+            )
         };
         match request {
             RequestInner::GetVersion => Ok(serde_json::to_value(env!("CARGO_PKG_VERSION"))?),

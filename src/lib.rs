@@ -1,11 +1,13 @@
 mod common;
+mod ipc_model;
 mod manager;
-mod model;
 mod plugin;
 mod saturating_ext;
 mod synthesizer;
 mod ui;
+mod voice;
 mod vst_common;
+mod state;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
