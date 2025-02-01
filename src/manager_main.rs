@@ -145,6 +145,8 @@ async fn main() -> Result<()> {
             }
         };
 
+        let unlock_result = lock_file.unlock();
+
         {
             let mut engine_process_lock = ENGINE_PROCESS.lock().await;
             if let Some(mut engine_process) = engine_process_lock.take() {
@@ -154,10 +156,10 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        lock_file.unlock()?;
-        drop(lock_file);
-        std::fs::remove_file(&lock_path)?;
 
+        drop(lock_file);
+        unlock_result?;
+        std::fs::remove_file(&lock_path)?;
         result?;
     } else {
         init_log(false)?;

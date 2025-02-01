@@ -378,30 +378,118 @@ impl PluginImpl {
             }
         }
         if let Ok(mut this) = this_ref.try_lock() {
+            if let (Ok(mix), Ok(critical_params)) =
+                (this.mix.try_read(), this.critical_params.try_read())
+            {
+                this.write_mix(
+                    &this_ref,
+                    &mix,
+                    &critical_params,
+                    outputs,
+                    sample_rate,
+                    is_playing,
+                    current_sample,
+                );
+            }
             this.update_playing_state(is_playing, current_sample, sample_rate);
             this.write_rtc_samples(outputs);
-            this.write_mixes(&this_ref, sample_rate, is_playing, current_sample, outputs);
+        }
+    }
+
+    fn write_mix(
+        &self,
+        this_ref: &Arc<Mutex<PluginImpl>>,
+        mix: &Mixes,
+        critical_params: &CriticalPluginParams,
+        outputs: &mut [&mut [f32]],
+        sample_rate: f32,
+        is_playing: bool,
+        current_sample: i64,
+    ) {
+        if mix.sample_rate != sample_rate {
+            let this_ref = Arc::clone(&this_ref);
+            RUNTIME.spawn(async move {
+                PluginImpl::update_audio_samples(this_ref, Some(sample_rate)).await;
+            });
+            return;
+        }
+        let samples = &mix.samples;
+        if samples.is_empty() || mix.samples_len == 0 {
+            return;
+        }
+        if is_playing {
+            for i in 0..outputs[0].len() {
+                let current_frame = current_sample + i as i64;
+                if current_frame < 0 {
+                    continue;
+                }
+                let current_frame = current_frame as usize;
+                if current_frame < mix.samples_len {
+                    let solo_track_exists =
+                        critical_params.tracks.iter().any(|(_, track)| track.solo);
+                    for (track_id, track) in critical_params.tracks.iter() {
+                        if solo_track_exists {
+                            if !track.solo {
+                                continue;
+                            }
+                        } else if track.mute {
+                            continue;
+                        }
+                        let Some(track_samples) = &samples.get(track_id) else {
+                            continue;
+                        };
+
+                        let Some(&channel_index) =
+                            critical_params.routing.channel_index.get(track_id)
+                        else {
+                            continue;
+                        };
+                        let channel_index = channel_index as usize;
+                        match critical_params.routing.channel_mode {
+                            ChannelMode::Mono => {
+                                outputs[channel_index][i] = outputs[channel_index][i]
+                                    .saturating_add(track_samples[current_frame] * track.gain);
+                            }
+                            ChannelMode::Stereo => {
+                                let (left_multiplier, right_multiplier) = if track.pan < 0.0 {
+                                    (1.0, 1.0 + track.pan)
+                                } else {
+                                    (1.0 - track.pan, 1.0)
+                                };
+                                outputs[channel_index * 2][i] = outputs[channel_index * 2][i]
+                                    .saturating_add(
+                                        track_samples[current_frame] * track.gain * left_multiplier,
+                                    );
+                                outputs[channel_index * 2 + 1][i] =
+                                    outputs[channel_index * 2 + 1][i].saturating_add(
+                                        track_samples[current_frame]
+                                            * track.gain
+                                            * right_multiplier,
+                                    );
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     fn update_playing_state(&mut self, is_playing: bool, current_sample: i64, sample_rate: f32) {
-        if (self.prev_position, self.prev_is_playing) != (current_sample, is_playing) {
-            if self.prev_position != current_sample {
-                self.prev_position = current_sample;
-                self.current_position = (current_sample as f32 / sample_rate).max(0.0);
-                self.current_position_updated = true;
-            }
-            if self.prev_is_playing != is_playing {
-                self.prev_is_playing = is_playing;
-                if let Some(sender) = &self.notification_sender {
-                    if sender
-                        .send(UiNotification::UpdatePlayingState(is_playing))
-                        .is_err()
-                    {
-                        self.notification_sender = None;
-                    }
+        if self.prev_is_playing != is_playing {
+            self.prev_is_playing = is_playing;
+            if let Some(sender) = &self.notification_sender {
+                if sender
+                    .send(UiNotification::UpdatePlayingState(is_playing))
+                    .is_err()
+                {
+                    self.notification_sender = None;
                 }
             }
+        }
+        if self.prev_position != current_sample {
+            self.prev_position = current_sample;
+            self.current_position = (current_sample as f32 / sample_rate).max(0.0);
+            self.current_position_updated = true;
         }
     }
 
@@ -423,88 +511,6 @@ impl PluginImpl {
             }
             for (output_r, &(_, sample_r)) in izip!(outputs[1].iter_mut(), &samples) {
                 *output_r = output_r.saturating_add(sample_r);
-            }
-        }
-    }
-
-    fn write_mixes(
-        &mut self,
-        this_ref: &Arc<Mutex<PluginImpl>>,
-        sample_rate: f32,
-        is_playing: bool,
-        current_sample: i64,
-        outputs: &mut [&mut [f32]],
-    ) {
-        if let (Ok(mix), Ok(critical_params)) =
-            (self.mix.try_read(), self.critical_params.try_read())
-        {
-            if mix.sample_rate != sample_rate {
-                let this_ref = Arc::clone(&this_ref);
-                RUNTIME.spawn(async move {
-                    PluginImpl::update_audio_samples(this_ref, Some(sample_rate)).await;
-                });
-                return;
-            }
-            let samples = &mix.samples;
-            if samples.is_empty() || mix.samples_len == 0 {
-                return;
-            }
-            if is_playing {
-                for i in 0..outputs[0].len() {
-                    let current_frame = current_sample + i as i64;
-                    if current_frame < 0 {
-                        continue;
-                    }
-                    let current_frame = current_frame as usize;
-                    if current_frame < mix.samples_len {
-                        let solo_track_exists =
-                            critical_params.tracks.iter().any(|(_, track)| track.solo);
-                        for (track_id, track) in critical_params.tracks.iter() {
-                            if solo_track_exists {
-                                if !track.solo {
-                                    continue;
-                                }
-                            } else if track.mute {
-                                continue;
-                            }
-                            let Some(track_samples) = &samples.get(track_id) else {
-                                continue;
-                            };
-
-                            let Some(&channel_index) =
-                                critical_params.routing.channel_index.get(track_id)
-                            else {
-                                continue;
-                            };
-                            let channel_index = channel_index as usize;
-                            match critical_params.routing.channel_mode {
-                                ChannelMode::Mono => {
-                                    outputs[channel_index][i] = outputs[channel_index][i]
-                                        .saturating_add(track_samples[current_frame] * track.gain);
-                                }
-                                ChannelMode::Stereo => {
-                                    let (left_multiplier, right_multiplier) = if track.pan < 0.0 {
-                                        (1.0, 1.0 + track.pan)
-                                    } else {
-                                        (1.0 - track.pan, 1.0)
-                                    };
-                                    outputs[channel_index * 2][i] = outputs[channel_index * 2][i]
-                                        .saturating_add(
-                                            track_samples[current_frame]
-                                                * track.gain
-                                                * left_multiplier,
-                                        );
-                                    outputs[channel_index * 2 + 1][i] =
-                                        outputs[channel_index * 2 + 1][i].saturating_add(
-                                            track_samples[current_frame]
-                                                * track.gain
-                                                * right_multiplier,
-                                        );
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
     }
