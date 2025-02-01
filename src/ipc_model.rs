@@ -2,6 +2,7 @@ use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RequestId(pub u32);
@@ -77,6 +78,12 @@ pub enum RequestInner {
         force_restart: bool,
     },
     ChangeEnginePath,
+
+    RtcSdp(serde_json::Value),
+    RtcIce {
+        nonce: Uuid,
+        ice: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

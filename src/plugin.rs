@@ -8,10 +8,10 @@ use crate::{
 };
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use ordered_float::OrderedFloat;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     io::Write as _,
     sync::{Arc, Once},
 };
@@ -20,6 +20,10 @@ use tracing::{debug, info, instrument};
 
 pub struct PluginImpl {
     pub notification_sender: Option<UnboundedSender<UiNotification>>,
+
+    pub rtc_sample_rate: Option<f32>,
+    pub rtc_samples: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<(f32, f32)>>>,
+    pub rtc_samples_buffer: VecDeque<(f32, f32)>,
 
     pub params: Arc<RwLock<PluginParams>>,
     pub critical_params: Arc<RwLock<CriticalPluginParams>>,
@@ -85,11 +89,16 @@ impl PluginImpl {
                 .with_ansi(false)
                 .try_init();
         });
+
         PluginImpl {
             notification_sender: None,
             params: Arc::new(RwLock::new(params)),
             critical_params: Arc::new(RwLock::new(critical_params)),
             mix: Arc::new(RwLock::new(Mixes::default())),
+
+            rtc_sample_rate: None,
+            rtc_samples: None,
+            rtc_samples_buffer: VecDeque::new(),
 
             prev_position: 0,
             prev_is_playing: false,
@@ -369,96 +378,130 @@ impl PluginImpl {
             }
         }
         if let Ok(mut this) = this_ref.try_lock() {
-            if let (Ok(mix), Ok(critical_params)) =
-                (this.mix.try_read(), this.critical_params.try_read())
-            {
-                if mix.sample_rate != sample_rate {
-                    let this_ref = Arc::clone(&this_ref);
-                    RUNTIME.spawn(async move {
-                        PluginImpl::update_audio_samples(this_ref, Some(sample_rate)).await;
-                    });
-                    return;
-                }
-                let samples = &mix.samples;
-                if samples.is_empty() || mix.samples_len == 0 {
-                    return;
-                }
-                if is_playing {
-                    for i in 0..outputs[0].len() {
-                        let current_frame = current_sample + i as i64;
-                        if current_frame < 0 {
-                            continue;
-                        }
-                        let current_frame = current_frame as usize;
-                        if current_frame < mix.samples_len {
-                            let solo_track_exists =
-                                critical_params.tracks.iter().any(|(_, track)| track.solo);
-                            for (track_id, track) in critical_params.tracks.iter() {
-                                if solo_track_exists {
-                                    if !track.solo {
-                                        continue;
-                                    }
-                                } else if track.mute {
-                                    continue;
-                                }
-                                let Some(track_samples) = &samples.get(track_id) else {
-                                    continue;
-                                };
+            this.update_playing_state(is_playing, current_sample, sample_rate);
+            this.write_rtc_samples(outputs);
+            this.write_mixes(&this_ref, sample_rate, is_playing, current_sample, outputs);
+        }
+    }
 
-                                let Some(&channel_index) =
-                                    critical_params.routing.channel_index.get(track_id)
-                                else {
-                                    continue;
-                                };
-                                let channel_index = channel_index as usize;
-                                match critical_params.routing.channel_mode {
-                                    ChannelMode::Mono => {
-                                        outputs[channel_index][i] = outputs[channel_index][i]
-                                            .saturating_add(
-                                                track_samples[current_frame] * track.gain,
-                                            );
-                                    }
-                                    ChannelMode::Stereo => {
-                                        let (left_multiplier, right_multiplier) = if track.pan < 0.0
-                                        {
-                                            (1.0, 1.0 + track.pan)
-                                        } else {
-                                            (1.0 - track.pan, 1.0)
-                                        };
-                                        outputs[channel_index * 2][i] =
-                                            outputs[channel_index * 2][i].saturating_add(
-                                                track_samples[current_frame]
-                                                    * track.gain
-                                                    * left_multiplier,
-                                            );
-                                        outputs[channel_index * 2 + 1][i] =
-                                            outputs[channel_index * 2 + 1][i].saturating_add(
-                                                track_samples[current_frame]
-                                                    * track.gain
-                                                    * right_multiplier,
-                                            );
-                                    }
-                                }
-                            }
-                        }
+    fn update_playing_state(&mut self, is_playing: bool, current_sample: i64, sample_rate: f32) {
+        if (self.prev_position, self.prev_is_playing) != (current_sample, is_playing) {
+            if self.prev_position != current_sample {
+                self.prev_position = current_sample;
+                self.current_position = (current_sample as f32 / sample_rate).max(0.0);
+                self.current_position_updated = true;
+            }
+            if self.prev_is_playing != is_playing {
+                self.prev_is_playing = is_playing;
+                if let Some(sender) = &self.notification_sender {
+                    if sender
+                        .send(UiNotification::UpdatePlayingState(is_playing))
+                        .is_err()
+                    {
+                        self.notification_sender = None;
                     }
                 }
             }
+        }
+    }
 
-            if (this.prev_position, this.prev_is_playing) != (current_sample, is_playing) {
-                if this.prev_position != current_sample {
-                    this.prev_position = current_sample;
-                    this.current_position = (current_sample as f32 / sample_rate).max(0.0);
-                    this.current_position_updated = true;
-                }
-                if this.prev_is_playing != is_playing {
-                    this.prev_is_playing = is_playing;
-                    if let Some(sender) = &this.notification_sender {
-                        if sender
-                            .send(UiNotification::UpdatePlayingState(is_playing))
-                            .is_err()
-                        {
-                            this.notification_sender = None;
+    fn write_rtc_samples(&mut self, outputs: &mut [&mut [f32]]) {
+        if let (Some(rtc_sample_rate), Some(samples_receiver)) =
+            (self.rtc_sample_rate, self.rtc_samples.as_mut())
+        {
+            let mut buffer = VecDeque::with_capacity(outputs[0].len());
+            while let Ok(samples) = samples_receiver.try_recv() {
+                buffer.extend(samples);
+            }
+            self.rtc_samples_buffer.extend(buffer);
+            let buffer_seconds = outputs[0].len() as f32 / rtc_sample_rate;
+            let frames = (buffer_seconds * rtc_sample_rate) as usize;
+            let frames = frames.min(self.rtc_samples_buffer.len());
+            let samples = self.rtc_samples_buffer.drain(..frames).collect::<Vec<_>>();
+            for (output_l, &(sample_l, _)) in izip!(outputs[0].iter_mut(), &samples) {
+                *output_l = output_l.saturating_add(sample_l);
+            }
+            for (output_r, &(_, sample_r)) in izip!(outputs[1].iter_mut(), &samples) {
+                *output_r = output_r.saturating_add(sample_r);
+            }
+        }
+    }
+
+    fn write_mixes(
+        &mut self,
+        this_ref: &Arc<Mutex<PluginImpl>>,
+        sample_rate: f32,
+        is_playing: bool,
+        current_sample: i64,
+        outputs: &mut [&mut [f32]],
+    ) {
+        if let (Ok(mix), Ok(critical_params)) =
+            (self.mix.try_read(), self.critical_params.try_read())
+        {
+            if mix.sample_rate != sample_rate {
+                let this_ref = Arc::clone(&this_ref);
+                RUNTIME.spawn(async move {
+                    PluginImpl::update_audio_samples(this_ref, Some(sample_rate)).await;
+                });
+                return;
+            }
+            let samples = &mix.samples;
+            if samples.is_empty() || mix.samples_len == 0 {
+                return;
+            }
+            if is_playing {
+                for i in 0..outputs[0].len() {
+                    let current_frame = current_sample + i as i64;
+                    if current_frame < 0 {
+                        continue;
+                    }
+                    let current_frame = current_frame as usize;
+                    if current_frame < mix.samples_len {
+                        let solo_track_exists =
+                            critical_params.tracks.iter().any(|(_, track)| track.solo);
+                        for (track_id, track) in critical_params.tracks.iter() {
+                            if solo_track_exists {
+                                if !track.solo {
+                                    continue;
+                                }
+                            } else if track.mute {
+                                continue;
+                            }
+                            let Some(track_samples) = &samples.get(track_id) else {
+                                continue;
+                            };
+
+                            let Some(&channel_index) =
+                                critical_params.routing.channel_index.get(track_id)
+                            else {
+                                continue;
+                            };
+                            let channel_index = channel_index as usize;
+                            match critical_params.routing.channel_mode {
+                                ChannelMode::Mono => {
+                                    outputs[channel_index][i] = outputs[channel_index][i]
+                                        .saturating_add(track_samples[current_frame] * track.gain);
+                                }
+                                ChannelMode::Stereo => {
+                                    let (left_multiplier, right_multiplier) = if track.pan < 0.0 {
+                                        (1.0, 1.0 + track.pan)
+                                    } else {
+                                        (1.0 - track.pan, 1.0)
+                                    };
+                                    outputs[channel_index * 2][i] = outputs[channel_index * 2][i]
+                                        .saturating_add(
+                                            track_samples[current_frame]
+                                                * track.gain
+                                                * left_multiplier,
+                                        );
+                                    outputs[channel_index * 2 + 1][i] =
+                                        outputs[channel_index * 2 + 1][i].saturating_add(
+                                            track_samples[current_frame]
+                                                * track.gain
+                                                * right_multiplier,
+                                        );
+                                }
+                            }
                         }
                     }
                 }

@@ -8,7 +8,7 @@ use std::{
     ffi::c_void,
     num::NonZero,
     ptr::NonNull,
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 use tap::prelude::*;
 use tokio::{
@@ -19,6 +19,31 @@ use tokio::{
     },
 };
 use tracing::{error, info, warn};
+use uuid::Uuid;
+
+static WEBRTC_API: LazyLock<webrtc::api::API> = LazyLock::new(|| {
+    let mut m = webrtc::api::media_engine::MediaEngine::default();
+
+    m.register_codec(
+        webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecParameters {
+            capability: webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability {
+                mime_type: webrtc::api::media_engine::MIME_TYPE_OPUS.to_owned(),
+                clock_rate: 48000,
+                channels: 2,
+                sdp_fmtp_line: "minptime=10;useinbandfec=1".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            payload_type: 111,
+            ..Default::default()
+        },
+        webrtc::rtp_transceiver::rtp_codec::RTPCodecType::Audio,
+    )
+    .expect("failed to register codec");
+
+    let api = webrtc::api::APIBuilder::new().with_media_engine(m).build();
+
+    api
+});
 
 static EDITOR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/resources/editor");
 pub struct PluginUiImpl {
@@ -38,6 +63,8 @@ pub struct PluginUiImpl {
 pub enum UiNotification {
     UpdatePlayingState(bool),
     EngineReady { port: u16 },
+
+    RtcIce(serde_json::Value),
 }
 
 #[derive(Debug, Clone)]
@@ -74,141 +101,154 @@ impl PluginUiImpl {
         let window_handle = raw_window_handle::WindowHandle::borrow_raw(raw_window_handle);
 
         let (notification_sender, notification_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (rtc_sender, rtc_receiver) = tokio::sync::mpsc::unbounded_channel();
         {
             let mut plugin = plugin.blocking_lock();
             plugin.notification_sender = Some(notification_sender.clone());
-        }
+            plugin.rtc_samples = Some(rtc_receiver);
+        };
+
+        let notification_sender = Arc::new(notification_sender);
+        let rtc_sender = Arc::new(rtc_sender);
+
+        let peer_connection = Arc::new(Mutex::<
+            Option<(Uuid, webrtc::peer_connection::RTCPeerConnection)>,
+        >::new(None));
 
         let (manager_sender, mut manager_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let notification_sender = Arc::new(notification_sender);
 
-        let manager = RUNTIME.spawn(async move {
-            let manager_name = if cfg!(target_os = "windows") {
-                "engine-manager.exe"
-            } else {
-                "engine-manager"
-            };
-            let manager_path = process_path::get_dylib_path()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join(manager_name);
-            info!("engine-manager path: {:?}", manager_path);
-            let mut manager_process = tokio::process::Command::new(manager_path)
-                .arg(handle.to_string())
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .pipe(|cmd| {
-                    #[cfg(target_os = "windows")]
-                    let cmd = cmd.creation_flags(common::WINDOWS_CREATE_NO_WINDOW);
-                    cmd
-                })
-                .spawn()
-                .unwrap();
-            info!("engine-manager started: {:?}", &manager_process);
-            let stderr = manager_process.stderr.take().unwrap();
-            let stderr = tokio::io::BufReader::new(stderr);
-            tokio::spawn(async move {
-                let mut lines = stderr.lines();
-                while let Some(line) = lines.next_line().await.unwrap() {
-                    error!("engine-manager stderr: {:?}", line);
-                }
-            });
-            let port = tokio::io::BufReader::new(manager_process.stdout.as_mut().unwrap())
-                .lines()
-                .next_line()
-                .await
-                .expect("failed to read port")
-                .inspect(|line| info!("engine-manager stdout: {:?}", line))
-                .expect("failed to read port")
-                .parse::<u16>()
-                .unwrap();
-            info!("engine-manager port: {}", port);
-            let mut manager_connection = tokio::net::TcpStream::connect(("127.0.0.1", port))
-                .await
-                .unwrap();
-            manager::pack(manager::ToManagerMessage::Hello, &mut manager_connection)
-                .await
-                .unwrap();
-            let (mut reader, writer) = manager_connection.into_split();
-            let writer = Arc::new(Mutex::new(writer));
-            let manager_communication = async {
-                loop {
-                    let message = match manager::unpack(&mut reader).await {
-                        Ok(message) => message,
-                        Err(err) => {
-                            error!("failed to read message: {}", err);
-                            break Err::<(), _>(err);
-                        }
-                    };
-                    match message {
-                        manager::ToClientMessage::Hello => {
-                            info!("received hello from engine-manager");
-                        }
-                        manager::ToClientMessage::Pong => {
-                            // noop
-                        }
-                        manager::ToClientMessage::EnginePort(port) => {
-                            info!("received engine ready from engine-manager: {}", port);
-                            let _ = notification_sender.send(UiNotification::EngineReady { port });
-                        }
+        let manager = RUNTIME.spawn({
+            let notification_sender = notification_sender.clone();
+            async move {
+                let manager_name = if cfg!(target_os = "windows") {
+                    "engine-manager.exe"
+                } else {
+                    "engine-manager"
+                };
+                let manager_path = process_path::get_dylib_path()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join(manager_name);
+                info!("engine-manager path: {:?}", manager_path);
+                let mut manager_process = tokio::process::Command::new(manager_path)
+                    .arg(handle.to_string())
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .pipe(|cmd| {
+                        #[cfg(target_os = "windows")]
+                        let cmd = cmd.creation_flags(common::WINDOWS_CREATE_NO_WINDOW);
+                        cmd
+                    })
+                    .spawn()
+                    .unwrap();
+                info!("engine-manager started: {:?}", &manager_process);
+                let stderr = manager_process.stderr.take().unwrap();
+                let stderr = tokio::io::BufReader::new(stderr);
+                tokio::spawn(async move {
+                    let mut lines = stderr.lines();
+                    while let Some(line) = lines.next_line().await.unwrap() {
+                        error!("engine-manager stderr: {:?}", line);
                     }
-                }
-            };
-            let ping = {
-                let writer = Arc::clone(&writer);
-                async move {
+                });
+                let port = tokio::io::BufReader::new(manager_process.stdout.as_mut().unwrap())
+                    .lines()
+                    .next_line()
+                    .await
+                    .expect("failed to read port")
+                    .inspect(|line| info!("engine-manager stdout: {:?}", line))
+                    .expect("failed to read port")
+                    .parse::<u16>()
+                    .unwrap();
+                info!("engine-manager port: {}", port);
+                let mut manager_connection = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                    .await
+                    .unwrap();
+                manager::pack(manager::ToManagerMessage::Hello, &mut manager_connection)
+                    .await
+                    .unwrap();
+                let (mut reader, writer) = manager_connection.into_split();
+                let writer = Arc::new(Mutex::new(writer));
+                let manager_communication = async {
                     loop {
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        let writer = &mut *writer.lock().await;
-                        if let Err(e) = manager::pack(manager::ToManagerMessage::Ping, writer).await
-                        {
-                            error!("failed to send ping: {}", e);
-                            break Err::<(), _>(e);
-                        }
-                    }
-                }
-            };
-            let manager_sender_communication = {
-                async {
-                    loop {
-                        let message = match manager_receiver.recv().await {
-                            Some(message) => message,
-                            None => break Ok(()),
+                        let message = match manager::unpack(&mut reader).await {
+                            Ok(message) => message,
+                            Err(err) => {
+                                error!("failed to read message: {}", err);
+                                break Err::<(), _>(err);
+                            }
                         };
                         match message {
-                            ManagerMessage::Send(message) => {
-                                let writer = &mut *writer.lock().await;
-                                if let Err(err) = manager::pack(message, writer).await {
-                                    error!("failed to send restart message: {}", err);
-                                    break Err(err);
-                                }
+                            manager::ToClientMessage::Hello => {
+                                info!("received hello from engine-manager");
                             }
-                            ManagerMessage::Stop => {
-                                break Ok(());
+                            manager::ToClientMessage::Pong => {
+                                // noop
+                            }
+                            manager::ToClientMessage::EnginePort(port) => {
+                                info!("received engine ready from engine-manager: {}", port);
+                                let _ =
+                                    notification_sender.send(UiNotification::EngineReady { port });
                             }
                         }
                     }
-                }
-            };
-            let result = tokio::select! {
-                result = manager_communication => {
-                    result
-                }
-                result = manager_sender_communication => {
-                    result
-                }
-                result = ping => {
-                    result
-                }
-            };
+                };
+                let ping = {
+                    let writer = Arc::clone(&writer);
+                    async move {
+                        loop {
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            let writer = &mut *writer.lock().await;
+                            if let Err(e) =
+                                manager::pack(manager::ToManagerMessage::Ping, writer).await
+                            {
+                                error!("failed to send ping: {}", e);
+                                break Err::<(), _>(e);
+                            }
+                        }
+                    }
+                };
+                let manager_sender_communication = {
+                    async {
+                        loop {
+                            let message = match manager_receiver.recv().await {
+                                Some(message) => message,
+                                None => break Ok(()),
+                            };
+                            match message {
+                                ManagerMessage::Send(message) => {
+                                    let writer = &mut *writer.lock().await;
+                                    if let Err(err) = manager::pack(message, writer).await {
+                                        error!("failed to send restart message: {}", err);
+                                        break Err(err);
+                                    }
+                                }
+                                ManagerMessage::Stop => {
+                                    break Ok(());
+                                }
+                            }
+                        }
+                    }
+                };
+                let result = tokio::select! {
+                    result = manager_communication => {
+                        result
+                    }
+                    result = manager_sender_communication => {
+                        result
+                    }
+                    result = ping => {
+                        result
+                    }
+                };
 
-            if let Err(err) = result {
-                error!("engine manager communication failed: {}", err);
+                if let Err(err) = result {
+                    error!("engine manager communication failed: {}", err);
+                }
+
+                info!("engine manager connection closed");
             }
-
-            info!("engine manager connection closed");
         });
 
         let (response_sender, response_receiver) =
@@ -271,6 +311,9 @@ impl PluginUiImpl {
                     let message = message.body().to_string();
                     let manager_sender = manager_sender.clone();
                     let zoom_sender = zoom_sender.clone();
+                    let notification_sender = notification_sender.clone();
+                    let peer_connection = Arc::clone(&peer_connection);
+                    let rtc_sender = Arc::clone(&rtc_sender);
                     RUNTIME.spawn(async move {
                         let value = match serde_json::from_str::<serde_json::Value>(&message) {
                             Ok(value) => value,
@@ -303,6 +346,9 @@ impl PluginUiImpl {
                             plugin_ref,
                             manager_sender,
                             zoom_sender,
+                            notification_sender,
+                            peer_connection,
+                            rtc_sender,
                             value.inner,
                         )
                         .await;
@@ -389,6 +435,9 @@ impl PluginUiImpl {
         plugin: Arc<Mutex<PluginImpl>>,
         manager_sender: UnboundedSender<ManagerMessage>,
         zoom_sender: UnboundedSender<f64>,
+        notification_sender: Arc<tokio::sync::mpsc::UnboundedSender<UiNotification>>,
+        peer_connection: Arc<Mutex<Option<(Uuid, webrtc::peer_connection::RTCPeerConnection)>>>,
+        rtc_sender: Arc<tokio::sync::mpsc::UnboundedSender<Vec<(f32, f32)>>>,
         request: RequestInner,
     ) -> Result<serde_json::Value> {
         let (params, critical_params) = {
@@ -625,6 +674,128 @@ impl PluginUiImpl {
                     manager::ToManagerMessage::ChangeEnginePath,
                 ));
                 Ok(serde_json::Value::Null)
+            }
+            RequestInner::RtcSdp(sdp) => {
+                let new_peer_connection =
+                    WEBRTC_API.new_peer_connection(Default::default()).await?;
+                let nonce = uuid::Uuid::new_v4();
+                new_peer_connection.on_peer_connection_state_change(Box::new({
+                    let peer_connection = peer_connection.clone();
+                    move |state| {
+                        info!("peer connection state change: {:?}", state);
+
+                        Box::pin({
+                            let peer_connection = peer_connection.clone();
+                            async move {
+                                if state
+                                    == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Failed
+                                {
+                                    let mut peer_connection = peer_connection.lock().await;
+                                    *peer_connection = None;
+                                }
+                            }
+                        })
+                    }
+                }));
+
+                new_peer_connection.on_ice_candidate(Box::new(move |candidate| {
+                    if let Err(err) = notification_sender.send(UiNotification::RtcIce(
+                        serde_json::to_value(candidate).expect("failed to serialize ice candidate"),
+                    )) {
+                        error!("failed to send ice candidate: {}", err);
+                    }
+                    Box::pin(async move {})
+                }));
+                new_peer_connection.on_track(Box::new(move |track, _, _| {
+                    info!("received track: {:?}", track);
+
+                    Box::pin({
+                        let rtc_sender = Arc::clone(&rtc_sender);
+                        let plugin = Arc::clone(&plugin);
+                        async move {
+                            {
+                                let mut plugin = plugin.lock().await;
+                                plugin.rtc_sample_rate =
+                                    Some(track.codec().capability.clock_rate as f32);
+                            }
+
+                            let mut decoder = match opus::Decoder::new(
+                                track.codec().capability.clock_rate as u32,
+                                opus::Channels::Stereo,
+                            ) {
+                                Ok(decoder) => decoder,
+                                Err(err) => {
+                                    error!("failed to create opus decoder: {}", err);
+                                    return;
+                                }
+                            };
+
+                            info!("start reading rtp");
+
+                            while let Ok((packet, _params)) = track.read_rtp().await {
+                                let payload = packet.payload;
+                                let num_samples = match decoder.get_nb_samples(&payload) {
+                                    Ok(num_samples) => num_samples,
+                                    Err(err) => {
+                                        error!("failed to get number of samples: {}", err);
+                                        continue;
+                                    }
+                                };
+
+                                let mut samples = vec![0.0; num_samples as usize];
+                                if let Err(err) = decoder.decode_float(&payload, &mut samples, true)
+                                {
+                                    error!("failed to decode samples: {}", err);
+                                    continue;
+                                };
+
+                                if let Err(err) = rtc_sender.send(
+                                    samples
+                                        .chunks(2)
+                                        .map(|chunk| (chunk[0], chunk[1]))
+                                        .collect(),
+                                ) {
+                                    error!("failed to send samples: {}", err);
+                                    break;
+                                }
+                            }
+                        }
+                    })
+                }));
+
+                info!("set remote description");
+                new_peer_connection
+                    .set_remote_description(serde_json::from_value(sdp)?)
+                    .await?;
+
+                let answer = new_peer_connection.create_answer(None).await?;
+                let answer_value = serde_json::to_value(&answer)?;
+                info!("set local description");
+                new_peer_connection.set_local_description(answer).await?;
+
+                let mut peer_connection = peer_connection.lock().await;
+                *peer_connection = Some((nonce, new_peer_connection));
+
+                let ret = serde_json::json!({
+                    "answer": answer_value,
+                    "nonce": nonce.to_string(),
+                });
+                Ok(ret)
+            }
+            RequestInner::RtcIce { nonce, ice } => {
+                let mut peer_connection = peer_connection.lock().await;
+                if let Some((current_nonce, peer_connection)) = &mut *peer_connection {
+                    if *current_nonce == nonce {
+                        peer_connection
+                            .add_ice_candidate(serde_json::from_value(ice)?)
+                            .await?;
+                        Ok(serde_json::Value::Null)
+                    } else {
+                        Err(anyhow::anyhow!("uuid mismatch"))
+                    }
+                } else {
+                    Err(anyhow::anyhow!("peer connection is not initialized"))
+                }
             }
         }
     }

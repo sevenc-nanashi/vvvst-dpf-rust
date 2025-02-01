@@ -3,11 +3,11 @@ mod ipc_model;
 mod manager;
 mod plugin;
 mod saturating_ext;
+mod state;
 mod synthesizer;
 mod ui;
 mod voice;
 mod vst_common;
-mod state;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -69,10 +69,9 @@ unsafe extern "C-unwind" fn cstring_drop(s: *mut std::os::raw::c_char) {
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_new() -> *mut Plugin {
     Box::into_raw(Box::new(Plugin {
-        inner: Arc::new(Mutex::new(plugin::PluginImpl::new(
-            Default::default(),
-            Default::default(),
-        ))),
+        inner: Arc::new(Mutex::new(
+            plugin::PluginImpl::new(Default::default(), Default::default()),
+        )),
     }))
 }
 
