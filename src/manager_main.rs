@@ -158,7 +158,7 @@ async fn main() -> Result<()> {
         }
 
         drop(lock_file);
-        unlock_result?
+        unlock_result?;
         std::fs::remove_file(&lock_path)?;
         result?;
     } else {
