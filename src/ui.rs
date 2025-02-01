@@ -626,6 +626,18 @@ impl PluginUiImpl {
                 ));
                 Ok(serde_json::Value::Null)
             }
+            RequestInner::LogInfo(message) => {
+                info!("webview: {}", message);
+                Ok(serde_json::Value::Null)
+            }
+            RequestInner::LogWarn(message) => {
+                warn!("webview: {}", message);
+                Ok(serde_json::Value::Null)
+            }
+            RequestInner::LogError(message) => {
+                error!("webview: {}", message);
+                Ok(serde_json::Value::Null)
+            }
         }
     }
 

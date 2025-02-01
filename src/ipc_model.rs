@@ -77,6 +77,10 @@ pub enum RequestInner {
         force_restart: bool,
     },
     ChangeEnginePath,
+
+    LogInfo(String),
+    LogWarn(String),
+    LogError(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

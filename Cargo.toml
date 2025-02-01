@@ -39,7 +39,6 @@ tracing = { version = "0.1.40", features = ["log"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
 wav_io = "0.1.14"
-webrtc = "0.12.0"
 winit = "0.30.5"
 wry = "0.46.3"
 zstd = "0.13.2"
