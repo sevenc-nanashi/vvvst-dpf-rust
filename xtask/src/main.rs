@@ -255,33 +255,40 @@ fn build(args: BuildArgs) {
 
     let current = std::time::Instant::now();
 
-    let build_type = format!(
+    let cmake_build_type = format!(
         "-DCMAKE_BUILD_TYPE={}",
         if args.release { "Release" } else { "Debug" }
     );
-    let build_dir = format!("-B{}", &destination_path.to_string_lossy());
+    let cmake_build_dir = format!("-B{}", &destination_path.to_string_lossy());
     // なぜか_add_libraryが無限に再帰するので、vcpkgを無効化する。
     // https://github.com/microsoft/vcpkg/issues/11307
+    // また、WindowsではReleaseビルドをするには--config Releaseを指定する必要があるため指定する。
     if cfg!(windows) {
         duct::cmd!(
             "cmake",
             "-DCMAKE_TOOLCHAIN_FILE=OFF",
-            &build_type,
-            &build_dir
+            &cmake_build_type,
+            &cmake_build_dir,
         )
     } else {
-        duct::cmd!("cmake", &build_type, &build_dir)
+        duct::cmd!("cmake", &cmake_build_type, &cmake_build_dir)
     }
     .before_spawn(|command| print_cmd(command))
     .dir(main_crate)
     .run()
     .unwrap();
-    duct::cmd!("cmake", "--build", &destination_path)
-        .dir(main_crate)
-        .before_spawn(|command| print_cmd(command))
-        .full_env(envs)
-        .run()
-        .unwrap();
+    duct::cmd!(
+        "cmake",
+        "--build",
+        &destination_path,
+        "--config",
+        if args.release { "release" } else { "debug" }
+    )
+    .dir(main_crate)
+    .before_spawn(|command| print_cmd(command))
+    .full_env(envs)
+    .run()
+    .unwrap();
 
     let elapsed = current.elapsed();
     green_log!(
