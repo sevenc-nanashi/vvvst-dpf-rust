@@ -181,6 +181,7 @@ impl PluginUiImpl {
                         };
                         match message {
                             ManagerMessage::Send(message) => {
+                                info!("sending message to engine-manager: {:?}", message);
                                 let writer = &mut *writer.lock().await;
                                 if let Err(err) = manager::pack(message, writer).await {
                                     error!("failed to send start message: {}", err);
