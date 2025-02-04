@@ -237,7 +237,7 @@ async fn run_server(server: tokio::net::TcpListener) -> Result<()> {
 async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
     stream.set_nodelay(true)?;
     info!("Connection established");
-    let (mut reader, writer) = stream.split();
+    let (reader, writer) = stream.split();
     {
         let mut current_connections = CURRENT_CONNECTIONS.lock().await;
         current_connections.num += 1;
@@ -250,6 +250,7 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> Result<()> {
         let writer = Arc::clone(&writer);
         let last_ping = Arc::clone(&last_ping);
         async move {
+            let mut reader = tokio::io::BufReader::new(reader);
             loop {
                 let unpacked: manager::ToManagerMessage = match manager::unpack(&mut reader).await {
                     Ok(unpacked) => unpacked,

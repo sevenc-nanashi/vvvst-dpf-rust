@@ -136,9 +136,10 @@ impl PluginUiImpl {
                 manager::pack(manager::ToManagerMessage::Hello, &mut manager_connection)
                     .await
                     .unwrap();
-                let (mut reader, writer) = manager_connection.into_split();
+                let (reader, writer) = manager_connection.into_split();
                 let writer = Arc::new(Mutex::new(writer));
                 let manager_communication = async {
+                    let mut reader = tokio::io::BufReader::new(reader);
                     loop {
                         let message = match manager::unpack(&mut reader).await {
                             Ok(message) => message,
