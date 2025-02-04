@@ -420,7 +420,7 @@ fn generate_installer() {
         .join("external");
     download_resource(
         &installer_external.join("vcredist_x64.exe"),
-        "https://aka.ms/vs/16/release/vc_redist.x64.exe",
+        "https://aka.ms/vs/17/release/vc_redist.x64.exe",
     );
     download_resource(
         &installer_external.join("MicrosoftEdgeWebview2Setup.exe"),
