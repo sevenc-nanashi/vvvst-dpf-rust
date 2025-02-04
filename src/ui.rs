@@ -151,7 +151,9 @@ impl PluginUiImpl {
                         }
                         manager::ToClientMessage::EnginePort(port) => {
                             info!("received engine ready from engine-manager: {}", port);
-                            let _ = notification_sender.send(UiNotification::EngineReady { port });
+                            notification_sender
+                                .send(UiNotification::EngineReady { port })
+                                .map_err(|_| anyhow::anyhow!("failed to send engine ready"))?;
                         }
                     }
                 }
@@ -181,7 +183,7 @@ impl PluginUiImpl {
                             ManagerMessage::Send(message) => {
                                 let writer = &mut *writer.lock().await;
                                 if let Err(err) = manager::pack(message, writer).await {
-                                    error!("failed to send restart message: {}", err);
+                                    error!("failed to send start message: {}", err);
                                     break Err(err);
                                 }
                             }
@@ -606,24 +608,29 @@ impl PluginUiImpl {
                 }
             }
             RequestInner::Zoom(value) => {
-                let _ = zoom_sender.send(value);
+                zoom_sender
+                    .send(value)
+                    .map_err(|_| anyhow::anyhow!("failed to send zoom"))?;
                 Ok(serde_json::Value::Null)
             }
             RequestInner::StartEngine {
                 use_gpu,
                 force_restart,
             } => {
-                let _ =
-                    manager_sender.send(ManagerMessage::Send(manager::ToManagerMessage::Start {
+                manager_sender
+                    .send(ManagerMessage::Send(manager::ToManagerMessage::Start {
                         use_gpu,
                         force_restart,
-                    }));
+                    }))
+                    .map_err(|_| anyhow::anyhow!("failed to send start message"))?;
                 Ok(serde_json::Value::Null)
             }
             RequestInner::ChangeEnginePath => {
-                let _ = manager_sender.send(ManagerMessage::Send(
-                    manager::ToManagerMessage::ChangeEnginePath,
-                ));
+                manager_sender
+                    .send(ManagerMessage::Send(
+                        manager::ToManagerMessage::ChangeEnginePath,
+                    ))
+                    .map_err(|_| anyhow::anyhow!("failed to send change engine path message"))?;
                 Ok(serde_json::Value::Null)
             }
             RequestInner::LogInfo(message) => {
