@@ -407,8 +407,10 @@ impl PluginUiImpl {
             RequestInner::GetConfig => {
                 let config = tokio::fs::read_to_string(if editor_config_path().exists() {
                     editor_config_path()
-                } else {
+                } else if original_config_path().exists() {
                     original_config_path()
+                } else {
+                    return Ok(serde_json::Value::Null);
                 })
                 .await?;
 
