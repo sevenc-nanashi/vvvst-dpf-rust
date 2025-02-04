@@ -3,11 +3,11 @@ mod ipc_model;
 mod manager;
 mod plugin;
 mod saturating_ext;
+mod state;
 mod synthesizer;
 mod ui;
 mod voice;
 mod vst_common;
-mod state;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -66,8 +66,18 @@ unsafe extern "C-unwind" fn cstring_drop(s: *mut std::os::raw::c_char) {
     let _ = std::ffi::CString::from_raw(s);
 }
 
+static NUM_PLUGINS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 #[no_mangle]
 unsafe extern "C-unwind" fn plugin_new() -> *mut Plugin {
+    let num_plugins = NUM_PLUGINS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    info!("Plugin created: {} -> {}", num_plugins, num_plugins + 1);
+    if num_plugins == 0 {
+        vst_common::RUNTIME
+            .lock()
+            .unwrap()
+            .replace(tokio::runtime::Runtime::new().unwrap());
+    }
     Box::into_raw(Box::new(Plugin {
         inner: Arc::new(Mutex::new(plugin::PluginImpl::new(
             Default::default(),
@@ -123,6 +133,12 @@ unsafe extern "C-unwind" fn plugin_drop(plugin: *mut Plugin) {
 
     let plugin = Box::from_raw(plugin);
     drop(plugin);
+
+    let num_plugins = NUM_PLUGINS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    info!("Plugin dropped: {} -> {}", num_plugins, num_plugins - 1);
+    if num_plugins == 1 {
+        cleanup_runtime();
+    }
 }
 
 #[no_mangle]
@@ -187,8 +203,24 @@ unsafe extern "C-unwind" fn plugin_ui_drop(plugin_ui: *mut PluginUi) {
     };
     let plugin_ui = plugin_ui.into_inner();
 
-    match vst_common::RUNTIME.block_on(plugin_ui.terminate()) {
+    match vst_common::RUNTIME
+        .lock()
+        .unwrap()
+        .as_ref()
+        .expect("runtime not initialized")
+        .block_on(plugin_ui.terminate())
+    {
         Ok(_) => info!("PluginUi dropped"),
         Err(e) => error!("Failed to drop PluginUi: {}", e),
     }
+}
+
+fn cleanup_runtime() {
+    info!("Cleaning up");
+    vst_common::RUNTIME
+        .lock()
+        .unwrap()
+        .take()
+        .expect("runtime not initialized")
+        .shutdown_timeout(std::time::Duration::from_secs(10));
 }
