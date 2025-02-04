@@ -69,6 +69,36 @@ Section "VVVST" Vvvst
                    "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
 SectionEnd
 
+; https://gist.github.com/jhandley/1ec569242170454c593a3b1642cc995e
+Section "WebView2"
+  ReadRegStr $0 HKLM \
+    "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
+
+  ${If} ${Errors}
+  ${OrIf} $0 == ""
+
+  SetDetailsPrint both
+  DetailPrint "Installing: WebView2 Runtime"
+  SetDetailsPrint listonly
+
+  InitPluginsDir
+  CreateDirectory "$pluginsdir\webview2bootstrapper"
+  SetOutPath "$pluginsdir\webview2bootstrapper"
+  File "Resources\installer\external\MicrosoftEdgeWebview2Setup.exe"
+  ExecWait '"$pluginsdir\webview2bootstrapper\MicrosoftEdgeWebview2Setup.exe" /silent /install'
+
+  SetDetailsPrint both
+
+  ${EndIf}
+SectionEnd
+
+Section "Visual Studio Runtime"
+  SetOutPath "$INSTDIR"
+  File "resources\installer\external\vcredist_x64.exe"
+  ExecWait "$INSTDIR\vcredist_x64.exe /install /quiet /norestart"
+  Delete "$INSTDIR\vcredist_x64.exe"
+SectionEnd
+
 ;-------------------------------------------------------------------------------
 ; Uninstaller Sections
 Section "Uninstall"
