@@ -18,9 +18,9 @@ VvvstPlugin::VvvstPlugin() : Plugin(0, 0, 1) {
  */
 const char *VvvstPlugin::getLabel() const {
 #ifdef DEBUG
-  return "vvvst_debug";
+  return "voicevox_debug";
 #else
-  return "vvvst";
+  return "voicevox";
 #endif
 }
 

@@ -418,7 +418,7 @@ impl PluginUiImpl {
         };
         match request {
             RequestInner::GetVersion => Ok(serde_json::to_value(env!("CARGO_PKG_VERSION"))?),
-            RequestInner::GetProjectName => Ok(serde_json::to_value("VOICEVOX VST")?),
+            RequestInner::GetProjectName => Ok(serde_json::to_value("VOICEVOX")?),
             RequestInner::GetConfig => {
                 let config = tokio::fs::read_to_string(if editor_config_path().exists() {
                     editor_config_path()

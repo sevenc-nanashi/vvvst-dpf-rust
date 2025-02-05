@@ -16,9 +16,9 @@
 
 ;-------------------------------------------------------------------------------
 ; Attributes
-Name "VOICEVOX VST"
+Name "VOICEVOX"
 OutFile "build/VOICEVOX_VST-{version}-windows-setup.exe"
-InstallDir "$PROGRAMFILES64\Common Files\VST3\VOICEVOX_VST.vst3"
+InstallDir "$PROGRAMFILES64\Common Files\VST3\VOICEVOX.vst3"
 RequestExecutionLevel admin ; user|highest|admin
 
 ;-------------------------------------------------------------------------------
@@ -59,7 +59,7 @@ Section "VVVST" Vvvst
 	SetOutPath "$INSTDIR"
   File "resources\installer\VVVST.ico"
   File "resources\installer\desktop.ini"
-  File /r "build\release\bin\vvvst.vst3\"
+  File /r "build\release\bin\voicevox.vst3\"
   System::Call "shlwapi::PathMakeSystemFolder(t '$INSTDIR') i."
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
