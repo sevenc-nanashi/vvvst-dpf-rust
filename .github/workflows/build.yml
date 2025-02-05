@@ -166,14 +166,14 @@ jobs:
       - name: Package
         run: |
           cd build/release/bin/
-          7z a -tzip ${{ steps.determine-information.outputs.zip_name }} vvvst.vst3
+          7z a -tzip ${{ steps.determine-information.outputs.zip_name }} voicevox.vst3
           cp ${{ steps.determine-information.outputs.zip_name }} ../../../
 
       - name: Package AU
         if: matrix.os == 'macos-latest'
         run: |
           cd build/release/bin/
-          7z a -tzip ${{ steps.determine-information.outputs.au_name }} vvvst.component
+          7z a -tzip ${{ steps.determine-information.outputs.au_name }} voicevox.component
           cp ${{ steps.determine-information.outputs.au_name }} ../../../
 
       - name: Build installer (Windows)
