@@ -52,7 +52,6 @@ impl PluginUiImpl {
         plugin: Arc<Mutex<PluginImpl>>,
         width: usize,
         height: usize,
-        scale_factor: f64,
     ) -> Result<Self> {
         let raw_window_handle = if cfg!(target_os = "windows") {
             raw_window_handle::RawWindowHandle::Win32(raw_window_handle::Win32WindowHandle::new(
@@ -233,11 +232,7 @@ impl PluginUiImpl {
         let webview_builder = wry::WebViewBuilder::with_web_context(&mut web_context)
             .with_bounds(wry::Rect {
                 position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
-                size: winit::dpi::PhysicalSize::new(
-                    width as f64 / scale_factor,
-                    height as f64 / scale_factor,
-                )
-                .into(),
+                size: winit::dpi::PhysicalSize::new(width as f64, height as f64).into(),
             })
             .with_clipboard(true)
             .with_background_color((165, 212, 173, 255))
@@ -391,14 +386,10 @@ impl PluginUiImpl {
         Ok(())
     }
 
-    pub fn set_size(&self, width: usize, height: usize, scale_factor: f64) -> Result<()> {
+    pub fn set_size(&self, width: usize, height: usize) -> Result<()> {
         self.webview.set_bounds(wry::Rect {
             position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
-            size: winit::dpi::PhysicalSize::new(
-                width as f64 / scale_factor,
-                height as f64 / scale_factor,
-            )
-            .into(),
+            size: winit::dpi::PhysicalSize::new(width as f64, height as f64).into(),
         })?;
         Ok(())
     }

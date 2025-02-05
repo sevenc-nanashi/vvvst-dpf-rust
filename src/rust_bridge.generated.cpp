@@ -65,22 +65,21 @@ void plugin_drop(Plugin *plugin) {
 }
 
 typedef PluginUi *(*plugin_ui_new_t)(uintptr_t handle, const Plugin *plugin,
-                                     uintptr_t width, uintptr_t height,
-                                     double scale_factor);
+                                     uintptr_t width, uintptr_t height);
 PluginUi *plugin_ui_new(uintptr_t handle, const Plugin *plugin, uintptr_t width,
-                        uintptr_t height, double scale_factor) {
+                        uintptr_t height) {
   auto rust = Rust::loadRustDll();
   auto fn = (plugin_ui_new_t)rust->findFunction("plugin_ui_new");
-  return fn(handle, plugin, width, height, scale_factor);
+  return fn(handle, plugin, width, height);
 }
 
 typedef void (*plugin_ui_set_size_t)(const PluginUi *plugin_ui, uintptr_t width,
-                                     uintptr_t height, double scale_factor);
+                                     uintptr_t height);
 void plugin_ui_set_size(const PluginUi *plugin_ui, uintptr_t width,
-                        uintptr_t height, double scale_factor) {
+                        uintptr_t height) {
   auto rust = Rust::loadRustDll();
   auto fn = (plugin_ui_set_size_t)rust->findFunction("plugin_ui_set_size");
-  return fn(plugin_ui, width, height, scale_factor);
+  return fn(plugin_ui, width, height);
 }
 
 typedef void (*plugin_ui_idle_t)(const PluginUi *plugin_ui);

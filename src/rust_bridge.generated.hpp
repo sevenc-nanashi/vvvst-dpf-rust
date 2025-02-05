@@ -5,6 +5,8 @@
 
 namespace Rust {
 
+constexpr static const uint32_t WINDOWS_CREATE_NO_WINDOW = 134217728;
+
 struct Plugin;
 
 struct PluginUi;
@@ -34,10 +36,10 @@ void plugin_run(const Plugin *plugin, float **outputs, float sample_rate,
 void plugin_drop(Plugin *plugin);
 
 PluginUi *plugin_ui_new(uintptr_t handle, const Plugin *plugin, uintptr_t width,
-                        uintptr_t height, double scale_factor);
+                        uintptr_t height);
 
 void plugin_ui_set_size(const PluginUi *plugin_ui, uintptr_t width,
-                        uintptr_t height, double scale_factor);
+                        uintptr_t height);
 
 void plugin_ui_idle(const PluginUi *plugin_ui);
 
