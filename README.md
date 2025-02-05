@@ -1,4 +1,4 @@
-# VVVST / VoiceVox VST
+# VOICEVOX VST
 
 Voicevox の VST プラグイン。
 

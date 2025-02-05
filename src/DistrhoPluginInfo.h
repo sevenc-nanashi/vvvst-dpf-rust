@@ -8,9 +8,9 @@
 // #define DISTRHO_PLUGIN_BRAND "Nanashi."
 #define DISTRHO_PLUGIN_BRAND "Voicevox"
 #ifdef DEBUG
-#define DISTRHO_PLUGIN_NAME "VVVST (Debug)"
+#define DISTRHO_PLUGIN_NAME "VOICEVOX VST (Debug)"
 #else
-#define DISTRHO_PLUGIN_NAME "VVVST"
+#define DISTRHO_PLUGIN_NAME "VOICEVOX VST"
 #endif
 #define DISTRHO_PLUGIN_URI "https://github.com/sevenc-nanashi/vvvst-dpf-rust/"
 

@@ -7,7 +7,7 @@
 
 ;-------------------------------------------------------------------------------
 ; Constants
-!define PRODUCT_NAME "VVVST"
+!define PRODUCT_NAME "VOICEVOX VST"
 !define PRODUCT_DESCRIPTION "VoicevoxのVSTプラグイン"
 !define COPYRIGHT "Copyright (c) 2024 Nanashi."
 # !define COPYRIGHT "Copyright (c) 2024 Hiroshiba Kazuyuki"
@@ -16,9 +16,9 @@
 
 ;-------------------------------------------------------------------------------
 ; Attributes
-Name "VVVST"
-OutFile "build/VVVST-{version}-windows-setup.exe"
-InstallDir "$PROGRAMFILES64\Common Files\VST3\VVVST.vst3"
+Name "VOICEVOX VST"
+OutFile "build/VOICEVOX_VST-{version}-windows-setup.exe"
+InstallDir "$PROGRAMFILES64\Common Files\VST3\VOICEVOX_VST.vst3"
 RequestExecutionLevel admin ; user|highest|admin
 
 ;-------------------------------------------------------------------------------
@@ -64,7 +64,7 @@ Section "VVVST" Vvvst
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\VVVST" \
-                   "DisplayName" "VVVST"
+                   "DisplayName" "VOICEVOX VST"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\VVVST" \
                    "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
 SectionEnd
