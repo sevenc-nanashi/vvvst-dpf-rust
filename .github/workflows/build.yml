@@ -24,8 +24,8 @@ jobs:
       - name: Checkout Voicevox
         uses: actions/checkout@v4
         with:
-          repository: "sevenc-nanashi/voicevox"
-          ref: "add/vst"
+          repository: "voicevox/voicevox"
+          ref: "project-vst"
 
       - name: Checkout VST
         uses: actions/checkout@v4
