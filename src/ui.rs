@@ -377,26 +377,6 @@ impl PluginUiImpl {
                             if let Err(err) = response_sender.send(response) {
                                 error!("failed to send response: {}", err);
                             }
-                            let result = PluginUiImpl::handle_request(
-                                plugin_ref,
-                                manager_sender,
-                                zoom_sender,
-                                notification_sender,
-                                peer_connection,
-                                rtc_sender,
-                                value.inner,
-                            )
-                            .await;
-                            let response = Response {
-                                request_id: value.request_id,
-                                payload: match result {
-                                    Ok(value) => Ok(value),
-                                    Err(err) => Err(err.to_string()),
-                                },
-                            };
-                            if let Err(err) = response_sender.send(response) {
-                                error!("failed to send response: {}", err);
-                            }
                         });
                 }
             });
