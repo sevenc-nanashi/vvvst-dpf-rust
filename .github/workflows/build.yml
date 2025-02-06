@@ -24,10 +24,10 @@ jobs:
       - name: Checkout Voicevox
         uses: actions/checkout@v4
         with:
-          repository: "sevenc-nanashi/voicevox"
-          ref: "add/vst"
+          repository: "voicevox/voicevox"
+          ref: "project-vst"
 
-      - name: Checkout VVVST
+      - name: Checkout VST
         uses: actions/checkout@v4
         with:
           path: vvvst
@@ -111,7 +111,7 @@ jobs:
       - name: Colorize
         run: |
           echo "CLICOLOR_FORCE=1" >> $GITHUB_ENV
-      - name: Checkout VVVST
+      - name: Checkout VST
         uses: actions/checkout@v4
         with:
           submodules: "recursive"
@@ -125,8 +125,8 @@ jobs:
             if (!version) {
               version = "255.255.255";
             }
-            core.setOutput('zip_name', `VVVST-${version}-${{ matrix.name }}.vst3.zip`);
-            core.setOutput('au_name', `VVVST-${version}-${{ matrix.name }}.au.zip`);
+            core.setOutput('zip_name', `VOICEVOX_VST-${version}-${{ matrix.name }}.vst3.zip`);
+            core.setOutput('au_name', `VOICEVOX_VST-${version}-${{ matrix.name }}.au.zip`);
       - name: Setup Rust
         run: rustup toolchain install stable --profile minimal
 
@@ -166,21 +166,21 @@ jobs:
       - name: Package
         run: |
           cd build/release/bin/
-          7z a -tzip ${{ steps.determine-information.outputs.zip_name }} vvvst.vst3
+          7z a -tzip ${{ steps.determine-information.outputs.zip_name }} voicevox.vst3
           cp ${{ steps.determine-information.outputs.zip_name }} ../../../
 
       - name: Package AU
         if: matrix.os == 'macos-latest'
         run: |
           cd build/release/bin/
-          7z a -tzip ${{ steps.determine-information.outputs.au_name }} vvvst.component
+          7z a -tzip ${{ steps.determine-information.outputs.au_name }} voicevox.component
           cp ${{ steps.determine-information.outputs.au_name }} ../../../
 
       - name: Build installer (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           cargo xtask generate-installer
-          cp ./build/VVVST-*-windows-setup.exe ./
+          cp ./build/VOICEVOX_VST-*-windows-setup.exe ./
 
       - name: Upload
         uses: actions/upload-artifact@v4
@@ -189,7 +189,7 @@ jobs:
           path: |
             ${{ steps.determine-information.outputs.zip_name }}
             ${{ steps.determine-information.outputs.au_name }}
-            VVVST-*-windows-setup.exe
+            VOICEVOX_VST-*-windows-setup.exe
 
   release:
     needs:

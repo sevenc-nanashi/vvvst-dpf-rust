@@ -408,9 +408,14 @@ impl PluginImpl {
     ) {
         if mix.sample_rate != sample_rate {
             let this_ref = Arc::clone(&this_ref);
-            RUNTIME.spawn(async move {
-                PluginImpl::update_audio_samples(this_ref, Some(sample_rate)).await;
-            });
+            RUNTIME
+                .lock()
+                .unwrap()
+                .as_ref()
+                .expect("Already dropped")
+                .spawn(async move {
+                    PluginImpl::update_audio_samples(this_ref, Some(sample_rate)).await;
+                });
             return;
         }
         let samples = &mix.samples;

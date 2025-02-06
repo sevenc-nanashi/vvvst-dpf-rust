@@ -1,10 +1,10 @@
 #include "plugin.hpp"
 #include "rust_bridge.generated.hpp"
 #include <DistrhoUI.hpp>
+#include <atomic>
 #include <dpf/dgl/Window.hpp>
 #include <memory>
 #include <mutex>
-#include <atomic>
 
 START_NAMESPACE_DISTRHO
 
@@ -42,7 +42,7 @@ public:
       return;
     }
     auto scale_factor = this->getScaleFactor();
-    Rust::plugin_ui_set_size(inner.get(), width, height, scale_factor);
+    Rust::plugin_ui_set_size(inner.get(), width, height);
   }
 
 private:
@@ -59,7 +59,7 @@ private:
     inner = std::shared_ptr<Rust::PluginUi>(
         Rust::plugin_ui_new(this->getWindow().getNativeWindowHandle(),
                             plugin->inner.get(), this->getWidth(),
-                            this->getHeight(), this->getScaleFactor()),
+                            this->getHeight()),
         [](Rust::PluginUi *inner) { Rust::plugin_ui_drop(inner); });
     if (!inner) {
       return;

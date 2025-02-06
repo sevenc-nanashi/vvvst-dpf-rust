@@ -32,6 +32,8 @@ _deps
 
 /resources/editor/*
 !/resources/editor/.gitkeep
+/resources/installer/external/*
+!/resources/installer/external/.gitkeep
 /resources/dist
 installer.nsi
 

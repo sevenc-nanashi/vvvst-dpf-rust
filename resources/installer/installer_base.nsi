@@ -7,7 +7,7 @@
 
 ;-------------------------------------------------------------------------------
 ; Constants
-!define PRODUCT_NAME "VVVST"
+!define PRODUCT_NAME "VOICEVOX VST"
 !define PRODUCT_DESCRIPTION "VoicevoxのVSTプラグイン"
 !define COPYRIGHT "Copyright (c) 2024 Nanashi."
 # !define COPYRIGHT "Copyright (c) 2024 Hiroshiba Kazuyuki"
@@ -16,9 +16,9 @@
 
 ;-------------------------------------------------------------------------------
 ; Attributes
-Name "VVVST"
-OutFile "build/VVVST-{version}-windows-setup.exe"
-InstallDir "$PROGRAMFILES64\Common Files\VST3\VVVST.vst3"
+Name "VOICEVOX"
+OutFile "build/VOICEVOX_VST-{version}-windows-setup.exe"
+InstallDir "$PROGRAMFILES64\Common Files\VST3\VOICEVOX.vst3"
 RequestExecutionLevel admin ; user|highest|admin
 
 ;-------------------------------------------------------------------------------
@@ -59,14 +59,44 @@ Section "VVVST" Vvvst
 	SetOutPath "$INSTDIR"
   File "resources\installer\VVVST.ico"
   File "resources\installer\desktop.ini"
-  File /r "build\release\bin\vvvst.vst3\"
+  File /r "build\release\bin\voicevox.vst3\"
   System::Call "shlwapi::PathMakeSystemFolder(t '$INSTDIR') i."
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\VVVST" \
-                   "DisplayName" "VVVST"
+                   "DisplayName" "VOICEVOX VST"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\VVVST" \
                    "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+SectionEnd
+
+; https://gist.github.com/jhandley/1ec569242170454c593a3b1642cc995e
+Section "WebView2"
+  ReadRegStr $0 HKLM \
+    "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
+
+  ${If} ${Errors}
+  ${OrIf} $0 == ""
+
+  SetDetailsPrint both
+  DetailPrint "Installing: WebView2 Runtime"
+  SetDetailsPrint listonly
+
+  InitPluginsDir
+  CreateDirectory "$pluginsdir\webview2bootstrapper"
+  SetOutPath "$pluginsdir\webview2bootstrapper"
+  File "Resources\installer\external\MicrosoftEdgeWebview2Setup.exe"
+  ExecWait '"$pluginsdir\webview2bootstrapper\MicrosoftEdgeWebview2Setup.exe" /silent /install'
+
+  SetDetailsPrint both
+
+  ${EndIf}
+SectionEnd
+
+Section "Visual Studio Runtime"
+  SetOutPath "$INSTDIR"
+  File "resources\installer\external\vcredist_x64.exe"
+  ExecWait "$INSTDIR\vcredist_x64.exe /install /quiet /norestart"
+  Delete "$INSTDIR\vcredist_x64.exe"
 SectionEnd
 
 ;-------------------------------------------------------------------------------

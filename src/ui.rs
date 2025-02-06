@@ -79,7 +79,6 @@ impl PluginUiImpl {
         plugin: Arc<Mutex<PluginImpl>>,
         width: usize,
         height: usize,
-        scale_factor: f64,
     ) -> Result<Self> {
         let raw_window_handle = if cfg!(target_os = "windows") {
             raw_window_handle::RawWindowHandle::Win32(raw_window_handle::Win32WindowHandle::new(
@@ -117,139 +116,151 @@ impl PluginUiImpl {
 
         let (manager_sender, mut manager_receiver) = tokio::sync::mpsc::unbounded_channel();
 
-        let manager = RUNTIME.spawn({
-            let notification_sender = notification_sender.clone();
-            async move {
-                let manager_name = if cfg!(target_os = "windows") {
-                    "engine-manager.exe"
-                } else {
-                    "engine-manager"
-                };
-                let manager_path = process_path::get_dylib_path()
-                    .unwrap()
-                    .parent()
-                    .unwrap()
-                    .join(manager_name);
-                info!("engine-manager path: {:?}", manager_path);
-                let mut manager_process = tokio::process::Command::new(manager_path)
-                    .arg(handle.to_string())
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .pipe(|cmd| {
-                        #[cfg(target_os = "windows")]
-                        let cmd = cmd.creation_flags(common::WINDOWS_CREATE_NO_WINDOW);
-                        cmd
-                    })
-                    .spawn()
-                    .unwrap();
-                info!("engine-manager started: {:?}", &manager_process);
-                let stderr = manager_process.stderr.take().unwrap();
-                let stderr = tokio::io::BufReader::new(stderr);
-                tokio::spawn(async move {
-                    let mut lines = stderr.lines();
-                    while let Some(line) = lines.next_line().await.unwrap() {
-                        error!("engine-manager stderr: {:?}", line);
-                    }
-                });
-                let port = tokio::io::BufReader::new(manager_process.stdout.as_mut().unwrap())
-                    .lines()
-                    .next_line()
-                    .await
-                    .expect("failed to read port")
-                    .inspect(|line| info!("engine-manager stdout: {:?}", line))
-                    .expect("failed to read port")
-                    .parse::<u16>()
-                    .unwrap();
-                info!("engine-manager port: {}", port);
-                let mut manager_connection = tokio::net::TcpStream::connect(("127.0.0.1", port))
-                    .await
-                    .unwrap();
-                manager::pack(manager::ToManagerMessage::Hello, &mut manager_connection)
-                    .await
-                    .unwrap();
-                let (mut reader, writer) = manager_connection.into_split();
-                let writer = Arc::new(Mutex::new(writer));
-                let manager_communication = async {
-                    loop {
-                        let message = match manager::unpack(&mut reader).await {
-                            Ok(message) => message,
-                            Err(err) => {
-                                error!("failed to read message: {}", err);
-                                break Err::<(), _>(err);
-                            }
-                        };
-                        match message {
-                            manager::ToClientMessage::Hello => {
-                                info!("received hello from engine-manager");
-                            }
-                            manager::ToClientMessage::Pong => {
-                                // noop
-                            }
-                            manager::ToClientMessage::EnginePort(port) => {
-                                info!("received engine ready from engine-manager: {}", port);
-                                let _ =
-                                    notification_sender.send(UiNotification::EngineReady { port });
-                            }
+        let manager = RUNTIME
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("Already dropped")
+            .spawn({
+                let notification_sender = notification_sender.clone();
+
+                async move {
+                    let manager_name = if cfg!(target_os = "windows") {
+                        "engine-manager.exe"
+                    } else {
+                        "engine-manager"
+                    };
+                    let manager_path = process_path::get_dylib_path()
+                        .unwrap()
+                        .parent()
+                        .unwrap()
+                        .join(manager_name);
+                    info!("engine-manager path: {:?}", manager_path);
+                    let mut manager_process = tokio::process::Command::new(manager_path)
+                        .arg(handle.to_string())
+                        .stdin(std::process::Stdio::piped())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .pipe(|cmd| {
+                            #[cfg(target_os = "windows")]
+                            let cmd = cmd.creation_flags(common::WINDOWS_CREATE_NO_WINDOW);
+                            cmd
+                        })
+                        .spawn()
+                        .unwrap();
+                    info!("engine-manager started: {:?}", &manager_process);
+                    let stderr = manager_process.stderr.take().unwrap();
+                    let stderr = tokio::io::BufReader::new(stderr);
+                    tokio::spawn(async move {
+                        let mut lines = stderr.lines();
+                        while let Some(line) = lines.next_line().await.unwrap() {
+                            error!("engine-manager stderr: {:?}", line);
                         }
-                    }
-                };
-                let ping = {
-                    let writer = Arc::clone(&writer);
-                    async move {
+                    });
+                    let port = tokio::io::BufReader::new(manager_process.stdout.as_mut().unwrap())
+                        .lines()
+                        .next_line()
+                        .await
+                        .expect("failed to read port")
+                        .inspect(|line| info!("engine-manager stdout: {:?}", line))
+                        .expect("failed to read port")
+                        .parse::<u16>()
+                        .unwrap();
+                    info!("engine-manager port: {}", port);
+                    let mut manager_connection =
+                        tokio::net::TcpStream::connect(("127.0.0.1", port))
+                            .await
+                            .unwrap();
+                    manager::pack(manager::ToManagerMessage::Hello, &mut manager_connection)
+                        .await
+                        .unwrap();
+                    let (reader, writer) = manager_connection.into_split();
+                    let writer = Arc::new(Mutex::new(writer));
+                    let manager_communication = async {
+                        let mut reader = tokio::io::BufReader::new(reader);
                         loop {
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                            let writer = &mut *writer.lock().await;
-                            if let Err(e) =
-                                manager::pack(manager::ToManagerMessage::Ping, writer).await
-                            {
-                                error!("failed to send ping: {}", e);
-                                break Err::<(), _>(e);
-                            }
-                        }
-                    }
-                };
-                let manager_sender_communication = {
-                    async {
-                        loop {
-                            let message = match manager_receiver.recv().await {
-                                Some(message) => message,
-                                None => break Ok(()),
+                            let message = match manager::unpack(&mut reader).await {
+                                Ok(message) => message,
+                                Err(err) => {
+                                    error!("failed to read message: {}", err);
+                                    break Err::<(), _>(err);
+                                }
                             };
                             match message {
-                                ManagerMessage::Send(message) => {
-                                    let writer = &mut *writer.lock().await;
-                                    if let Err(err) = manager::pack(message, writer).await {
-                                        error!("failed to send restart message: {}", err);
-                                        break Err(err);
-                                    }
+                                manager::ToClientMessage::Hello => {
+                                    info!("received hello from engine-manager");
                                 }
-                                ManagerMessage::Stop => {
-                                    break Ok(());
+                                manager::ToClientMessage::Pong => {
+                                    // noop
+                                }
+                                manager::ToClientMessage::EnginePort(port) => {
+                                    info!("received engine ready from engine-manager: {}", port);
+                                    notification_sender
+                                        .send(UiNotification::EngineReady { port })
+                                        .map_err(|_| {
+                                            anyhow::anyhow!("failed to send engine ready")
+                                        })?;
                                 }
                             }
                         }
-                    }
-                };
-                let result = tokio::select! {
-                    result = manager_communication => {
-                        result
-                    }
-                    result = manager_sender_communication => {
-                        result
-                    }
-                    result = ping => {
-                        result
-                    }
-                };
+                    };
+                    let ping = {
+                        let writer = Arc::clone(&writer);
+                        async move {
+                            loop {
+                                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                let writer = &mut *writer.lock().await;
+                                if let Err(e) =
+                                    manager::pack(manager::ToManagerMessage::Ping, writer).await
+                                {
+                                    error!("failed to send ping: {}", e);
+                                    break Err::<(), _>(e);
+                                }
+                            }
+                        }
+                    };
+                    let manager_sender_communication = {
+                        async {
+                            loop {
+                                let message = match manager_receiver.recv().await {
+                                    Some(message) => message,
+                                    None => break Ok(()),
+                                };
+                                match message {
+                                    ManagerMessage::Send(message) => {
+                                        info!("sending message to engine-manager: {:?}", message);
+                                        let writer = &mut *writer.lock().await;
+                                        if let Err(err) = manager::pack(message, writer).await {
+                                            error!("failed to send start message: {}", err);
+                                            break Err(err);
+                                        }
+                                    }
+                                    ManagerMessage::Stop => {
+                                        break Ok(());
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    let result = tokio::select! {
+                        result = manager_communication => {
+                            result
+                        }
+                        result = manager_sender_communication => {
+                            result
+                        }
+                        result = ping => {
+                            result
+                        }
+                    };
 
-                if let Err(err) = result {
-                    error!("engine manager communication failed: {}", err);
+                    if let Err(err) = result {
+                        error!("engine manager communication failed: {}", err);
+                    }
+
+                    info!("engine manager connection closed");
                 }
-
-                info!("engine manager connection closed");
-            }
-        });
+            });
 
         let (response_sender, response_receiver) =
             tokio::sync::mpsc::unbounded_channel::<Response>();
@@ -263,11 +274,7 @@ impl PluginUiImpl {
         let webview_builder = wry::WebViewBuilder::with_web_context(&mut web_context)
             .with_bounds(wry::Rect {
                 position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
-                size: winit::dpi::LogicalSize::new(
-                    width as f64 / scale_factor,
-                    height as f64 / scale_factor,
-                )
-                .into(),
+                size: winit::dpi::PhysicalSize::new(width as f64, height as f64).into(),
             })
             .with_clipboard(true)
             .with_background_color((165, 212, 173, 255))
@@ -314,55 +321,83 @@ impl PluginUiImpl {
                     let notification_sender = notification_sender.clone();
                     let peer_connection = Arc::clone(&peer_connection);
                     let rtc_sender = Arc::clone(&rtc_sender);
-                    RUNTIME.spawn(async move {
-                        let value = match serde_json::from_str::<serde_json::Value>(&message) {
-                            Ok(value) => value,
-                            Err(err) => {
-                                error!("failed to parse message: {}", err);
-                                return;
-                            }
-                        };
-                        let value = match serde_json::from_value::<Request>(value.clone()) {
-                            Ok(value) => value,
-                            Err(err) => {
-                                // 可能な限りエラーを返してあげる
-                                let request_id = value["requestId"].as_u64();
-                                if let Some(request_id) = request_id {
-                                    let response = Response {
-                                        request_id: RequestId(request_id as u32),
-                                        payload: Err(format!("failed to parse request: {}", err)),
-                                    };
-                                    warn!("failed to parse request: {}", err);
-                                    if let Err(err) = response_sender.send(response) {
-                                        error!("failed to send response: {}", err);
-                                    }
-                                } else {
-                                    error!("failed to parse request: {}", err);
+                    RUNTIME
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .expect("Already dropped")
+                        .spawn(async move {
+                            let value = match serde_json::from_str::<serde_json::Value>(&message) {
+                                Ok(value) => value,
+                                Err(err) => {
+                                    error!("failed to parse message: {}", err);
+                                    return;
                                 }
-                                return;
+                            };
+                            let value = match serde_json::from_value::<Request>(value.clone()) {
+                                Ok(value) => value,
+                                Err(err) => {
+                                    // 可能な限りエラーを返してあげる
+                                    let request_id = value["requestId"].as_u64();
+                                    if let Some(request_id) = request_id {
+                                        let response = Response {
+                                            request_id: RequestId(request_id as u32),
+                                            payload: Err(format!(
+                                                "failed to parse request: {}",
+                                                err
+                                            )),
+                                        };
+                                        warn!("failed to parse request: {}", err);
+                                        if let Err(err) = response_sender.send(response) {
+                                            error!("failed to send response: {}", err);
+                                        }
+                                    } else {
+                                        error!("failed to parse request: {}", err);
+                                    }
+                                    return;
+                                }
+                            };
+                            let result = PluginUiImpl::handle_request(
+                                plugin_ref,
+                                manager_sender,
+                                zoom_sender,
+                                notification_sender,
+                                peer_connection,
+                                rtc_sender,
+                                value.inner,
+                            )
+                            .await;
+                            let response = Response {
+                                request_id: value.request_id,
+                                payload: match result {
+                                    Ok(value) => Ok(value),
+                                    Err(err) => Err(err.to_string()),
+                                },
+                            };
+                            if let Err(err) = response_sender.send(response) {
+                                error!("failed to send response: {}", err);
                             }
-                        };
-                        let result = PluginUiImpl::handle_request(
-                            plugin_ref,
-                            manager_sender,
-                            zoom_sender,
-                            notification_sender,
-                            peer_connection,
-                            rtc_sender,
-                            value.inner,
-                        )
-                        .await;
-                        let response = Response {
-                            request_id: value.request_id,
-                            payload: match result {
-                                Ok(value) => Ok(value),
-                                Err(err) => Err(err.to_string()),
-                            },
-                        };
-                        if let Err(err) = response_sender.send(response) {
-                            error!("failed to send response: {}", err);
-                        }
-                    });
+                            let result = PluginUiImpl::handle_request(
+                                plugin_ref,
+                                manager_sender,
+                                zoom_sender,
+                                notification_sender,
+                                peer_connection,
+                                rtc_sender,
+                                value.inner,
+                            )
+                            .await;
+                            let response = Response {
+                                request_id: value.request_id,
+                                payload: match result {
+                                    Ok(value) => Ok(value),
+                                    Err(err) => Err(err.to_string()),
+                                },
+                            };
+                            if let Err(err) = response_sender.send(response) {
+                                error!("failed to send response: {}", err);
+                            }
+                        });
                 }
             });
 
@@ -419,14 +454,10 @@ impl PluginUiImpl {
         Ok(())
     }
 
-    pub fn set_size(&self, width: usize, height: usize, scale_factor: f64) -> Result<()> {
+    pub fn set_size(&self, width: usize, height: usize) -> Result<()> {
         self.webview.set_bounds(wry::Rect {
             position: winit::dpi::LogicalPosition::new(0.0, 0.0).into(),
-            size: winit::dpi::LogicalSize::new(
-                width as f64 / scale_factor,
-                height as f64 / scale_factor,
-            )
-            .into(),
+            size: winit::dpi::PhysicalSize::new(width as f64, height as f64).into(),
         })?;
         Ok(())
     }
@@ -449,12 +480,14 @@ impl PluginUiImpl {
         };
         match request {
             RequestInner::GetVersion => Ok(serde_json::to_value(env!("CARGO_PKG_VERSION"))?),
-            RequestInner::GetProjectName => Ok(serde_json::to_value("VVVST")?),
+            RequestInner::GetProjectName => Ok(serde_json::to_value("VOICEVOX")?),
             RequestInner::GetConfig => {
                 let config = tokio::fs::read_to_string(if editor_config_path().exists() {
                     editor_config_path()
-                } else {
+                } else if original_config_path().exists() {
                     original_config_path()
+                } else {
+                    return Ok(serde_json::Value::Null);
                 })
                 .await?;
 
@@ -655,24 +688,29 @@ impl PluginUiImpl {
                 }
             }
             RequestInner::Zoom(value) => {
-                let _ = zoom_sender.send(value);
+                zoom_sender
+                    .send(value)
+                    .map_err(|_| anyhow::anyhow!("failed to send zoom"))?;
                 Ok(serde_json::Value::Null)
             }
             RequestInner::StartEngine {
                 use_gpu,
                 force_restart,
             } => {
-                let _ =
-                    manager_sender.send(ManagerMessage::Send(manager::ToManagerMessage::Start {
+                manager_sender
+                    .send(ManagerMessage::Send(manager::ToManagerMessage::Start {
                         use_gpu,
                         force_restart,
-                    }));
+                    }))
+                    .map_err(|_| anyhow::anyhow!("failed to send start message"))?;
                 Ok(serde_json::Value::Null)
             }
             RequestInner::ChangeEnginePath => {
-                let _ = manager_sender.send(ManagerMessage::Send(
-                    manager::ToManagerMessage::ChangeEnginePath,
-                ));
+                manager_sender
+                    .send(ManagerMessage::Send(
+                        manager::ToManagerMessage::ChangeEnginePath,
+                    ))
+                    .map_err(|_| anyhow::anyhow!("failed to send change engine path message"))?;
                 Ok(serde_json::Value::Null)
             }
             RequestInner::RtcSdp(sdp) => {

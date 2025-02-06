@@ -18,16 +18,15 @@ pub async fn pack<T: Serialize>(
 }
 
 pub async fn unpack<T: DeserializeOwned>(
-    stream: impl tokio::io::AsyncRead + std::marker::Unpin,
+    stream: &mut tokio::io::BufReader<impl tokio::io::AsyncRead + std::marker::Unpin>,
 ) -> anyhow::Result<T> {
     let mut length_buf = [0; 4];
-    let mut stream = tokio::io::BufReader::new(stream);
-    tokio::io::AsyncReadExt::read_exact(&mut stream, &mut length_buf).await?;
+    tokio::io::AsyncReadExt::read_exact(stream, &mut length_buf).await?;
 
     let length = u32::from_le_bytes(length_buf);
     let mut serialized = vec![0; length as usize];
 
-    tokio::io::AsyncReadExt::read_exact(&mut stream, &mut serialized).await?;
+    tokio::io::AsyncReadExt::read_exact(stream, &mut serialized).await?;
 
     Ok(bincode::deserialize(&serialized)?)
 }

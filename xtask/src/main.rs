@@ -255,33 +255,40 @@ fn build(args: BuildArgs) {
 
     let current = std::time::Instant::now();
 
-    let build_type = format!(
+    let cmake_build_type = format!(
         "-DCMAKE_BUILD_TYPE={}",
         if args.release { "Release" } else { "Debug" }
     );
-    let build_dir = format!("-B{}", &destination_path.to_string_lossy());
+    let cmake_build_dir = format!("-B{}", &destination_path.to_string_lossy());
     // なぜか_add_libraryが無限に再帰するので、vcpkgを無効化する。
     // https://github.com/microsoft/vcpkg/issues/11307
+    // また、WindowsではReleaseビルドをするには--config Releaseを指定する必要があるため指定する。
     if cfg!(windows) {
         duct::cmd!(
             "cmake",
             "-DCMAKE_TOOLCHAIN_FILE=OFF",
-            &build_type,
-            &build_dir
+            &cmake_build_type,
+            &cmake_build_dir,
         )
     } else {
-        duct::cmd!("cmake", &build_type, &build_dir)
+        duct::cmd!("cmake", &cmake_build_type, &cmake_build_dir)
     }
     .before_spawn(|command| print_cmd(command))
     .dir(main_crate)
     .run()
     .unwrap();
-    duct::cmd!("cmake", "--build", &destination_path)
-        .dir(main_crate)
-        .before_spawn(|command| print_cmd(command))
-        .full_env(envs)
-        .run()
-        .unwrap();
+    duct::cmd!(
+        "cmake",
+        "--build",
+        &destination_path,
+        "--config",
+        if args.release { "release" } else { "debug" }
+    )
+    .dir(main_crate)
+    .before_spawn(|command| print_cmd(command))
+    .full_env(envs)
+    .run()
+    .unwrap();
 
     let elapsed = current.elapsed();
     green_log!(
@@ -332,7 +339,13 @@ fn generate_licenses() {
         false,
         vec![],
         false,
+        krates::LockOptions {
+            frozen: false,
+            locked: false,
+            offline: false,
+        },
         &Default::default(),
+        &[],
     )
     .unwrap();
     let licenses = krates
@@ -407,6 +420,19 @@ fn generate_installer() {
     let version = main_cargo_toml.package.unwrap().version.unwrap();
     let version = semver::Version::parse(&version).unwrap();
 
+    let installer_external = main_crate
+        .join("resources")
+        .join("installer")
+        .join("external");
+    download_resource(
+        &installer_external.join("vcredist_x64.exe"),
+        "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+    );
+    download_resource(
+        &installer_external.join("MicrosoftEdgeWebview2Setup.exe"),
+        "https://go.microsoft.com/fwlink/p/?LinkId=2124703",
+    );
+
     let installer_base = main_crate
         .join("resources")
         .join("installer")
@@ -431,11 +457,24 @@ fn generate_installer() {
         .unwrap();
     green_log!(
         "Finished",
-        "built to {:?} in {}.{:03}s",
-        installer_dist.with_extension("exe"),
+        "built in {:?} in {}.{:03}s",
+        main_crate.join("build"),
         current.elapsed().as_secs(),
         current.elapsed().subsec_millis()
     );
+
+    fn download_resource(path: &std::path::Path, url: &str) {
+        if path.exists() {
+            green_log!("Skipped", "{:?} already exists", path);
+            return;
+        }
+        blue_log!("Downloading", "{:?} from {}", path, url);
+        let response = ureq::get(url).call().unwrap();
+        let mut file = std::fs::File::create(&path).unwrap();
+        std::io::copy(&mut response.into_body().into_reader(), &mut file).unwrap();
+
+        green_log!("Downloaded", "{:?} from {}", path, url);
+    }
 }
 
 #[derive(Debug)]
