@@ -1,6 +1,7 @@
 use crate::{common, ipc_model::*, manager, plugin::PluginImpl, voice::Voice, vst_common::RUNTIME};
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as base64, Engine as _};
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
@@ -20,7 +21,6 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 use uuid::Uuid;
-use webrtc::media::io::Writer;
 
 static WEBRTC_API: LazyLock<webrtc::api::API> = LazyLock::new(|| {
     let mut m = webrtc::api::media_engine::MediaEngine::default();
@@ -758,32 +758,31 @@ impl PluginUiImpl {
 
                             info!("start reading rtp");
 
+                            let mut samples = vec![0.0; 5760];
                             while let Ok((packet, _params)) = track.read_rtp().await {
                                 let payload = packet.payload;
-                                let num_samples = match decoder.get_nb_samples(&payload) {
-                                    Ok(num_samples) => num_samples,
-                                    Err(err) => {
-                                        error!("failed to get number of samples: {}", err);
-                                        continue;
-                                    }
-                                };
-                                tracing::debug!("num_samples: {}", num_samples);
 
-                                let mut samples = vec![0.0; num_samples as usize];
-                                match decoder.decode_float(&payload, &mut samples, true) {
-                                    Ok(size) => {
-                                        tracing::debug!("decoded samples: {:?}", size);
-                                    }
-                                    Err(err) => {
-                                        error!("failed to decode samples: {}", err);
-                                        continue;
-                                    }
-                                };
+                                let decoded =
+                                    match decoder.decode_float(&payload, &mut samples, false) {
+                                        Ok(decoded) => decoded,
+                                        Err(err) => {
+                                            error!("failed to decode samples: {}", err);
+                                            continue;
+                                        }
+                                    };
 
                                 if let Err(err) = rtc_sender.send(
                                     samples
+                                        .iter()
+                                        .take(decoded * 2)
                                         .chunks(2)
-                                        .map(|chunk| (chunk[0] as f32, chunk[1] as f32))
+                                        .into_iter()
+                                        .map(|mut chunk| {
+                                            (
+                                                chunk.next().unwrap().to_owned(),
+                                                chunk.next().unwrap().to_owned(),
+                                            )
+                                        })
                                         .collect(),
                                 ) {
                                     error!("failed to send samples: {}", err);

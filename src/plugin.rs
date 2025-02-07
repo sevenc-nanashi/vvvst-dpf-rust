@@ -392,7 +392,7 @@ impl PluginImpl {
                 );
             }
             this.update_playing_state(is_playing, current_sample, sample_rate);
-            this.write_rtc_samples(outputs);
+            this.write_rtc_samples(outputs, sample_rate);
         }
     }
 
@@ -498,7 +498,7 @@ impl PluginImpl {
         }
     }
 
-    fn write_rtc_samples(&mut self, outputs: &mut [&mut [f32]]) {
+    fn write_rtc_samples(&mut self, outputs: &mut [&mut [f32]], sample_rate: f32) {
         if let (Some(rtc_sample_rate), Some(samples_receiver)) =
             (self.rtc_sample_rate, self.rtc_samples.as_mut())
         {
@@ -507,14 +507,32 @@ impl PluginImpl {
                 buffer.extend(samples);
             }
             self.rtc_samples_buffer.extend(buffer);
-            let buffer_seconds = outputs[0].len() as f32 / rtc_sample_rate;
-            let frames = (buffer_seconds * rtc_sample_rate) as usize;
+            let requested_seconds = outputs[0].len() as f32 / sample_rate;
+            let frames = (requested_seconds * rtc_sample_rate) as usize;
             let frames = frames.min(self.rtc_samples_buffer.len());
+            if frames == 0 {
+                return;
+            }
+            if self.rtc_samples_buffer.len() > frames * 8 {
+                self.rtc_samples_buffer.drain(..self.rtc_samples_buffer.len() - frames * 2);
+            }
             let samples = self.rtc_samples_buffer.drain(..frames).collect::<Vec<_>>();
-            for (output_l, &(sample_l, _)) in izip!(outputs[0].iter_mut(), &samples) {
+            let resampled_left_samples = wav_io::resample::linear(
+                samples.iter().map(|(l, _r)| *l).collect::<Vec<_>>(),
+                1,
+                rtc_sample_rate as u32,
+                sample_rate as u32,
+            );
+            let resampled_right_samples = wav_io::resample::linear(
+                samples.iter().map(|(_l, r)| *r).collect::<Vec<_>>(),
+                1,
+                rtc_sample_rate as u32,
+                sample_rate as u32,
+            );
+            for (output_l, sample_l) in izip!(outputs[0].iter_mut(), resampled_left_samples) {
                 *output_l = output_l.saturating_add(sample_l);
             }
-            for (output_r, &(_, sample_r)) in izip!(outputs[1].iter_mut(), &samples) {
+            for (output_r, sample_r) in izip!(outputs[1].iter_mut(), resampled_right_samples) {
                 *output_r = output_r.saturating_add(sample_r);
             }
         }
