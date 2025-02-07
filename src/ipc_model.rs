@@ -82,7 +82,7 @@ pub enum RequestInner {
     RtcSdp(serde_json::Value),
     RtcIce {
         nonce: Uuid,
-        ice: serde_json::Value,
+        ice: Option<serde_json::Value>,
     },
 
     LogInfo(String),

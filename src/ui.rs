@@ -20,6 +20,7 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 use uuid::Uuid;
+use webrtc::media::io::Writer;
 
 static WEBRTC_API: LazyLock<webrtc::api::API> = LazyLock::new(|| {
     let mut m = webrtc::api::media_engine::MediaEngine::default();
@@ -696,6 +697,12 @@ impl PluginUiImpl {
             RequestInner::RtcSdp(sdp) => {
                 let new_peer_connection =
                     WEBRTC_API.new_peer_connection(Default::default()).await?;
+                new_peer_connection
+                    .add_transceiver_from_kind(
+                        webrtc::rtp_transceiver::rtp_codec::RTPCodecType::Audio,
+                        None,
+                    )
+                    .await?;
                 let nonce = uuid::Uuid::new_v4();
                 new_peer_connection.on_peer_connection_state_change(Box::new({
                     let peer_connection = peer_connection.clone();
@@ -717,6 +724,7 @@ impl PluginUiImpl {
                 }));
 
                 new_peer_connection.on_ice_candidate(Box::new(move |candidate| {
+                    let candidate = candidate.and_then(|candidate| candidate.to_json().ok());
                     if let Err(err) = notification_sender.send(UiNotification::RtcIce(
                         serde_json::to_value(candidate).expect("failed to serialize ice candidate"),
                     )) {
@@ -759,18 +767,23 @@ impl PluginUiImpl {
                                         continue;
                                     }
                                 };
+                                tracing::debug!("num_samples: {}", num_samples);
 
                                 let mut samples = vec![0.0; num_samples as usize];
-                                if let Err(err) = decoder.decode_float(&payload, &mut samples, true)
-                                {
-                                    error!("failed to decode samples: {}", err);
-                                    continue;
+                                match decoder.decode_float(&payload, &mut samples, true) {
+                                    Ok(size) => {
+                                        tracing::debug!("decoded samples: {:?}", size);
+                                    }
+                                    Err(err) => {
+                                        error!("failed to decode samples: {}", err);
+                                        continue;
+                                    }
                                 };
 
                                 if let Err(err) = rtc_sender.send(
                                     samples
                                         .chunks(2)
-                                        .map(|chunk| (chunk[0], chunk[1]))
+                                        .map(|chunk| (chunk[0] as f32, chunk[1] as f32))
                                         .collect(),
                                 ) {
                                     error!("failed to send samples: {}", err);
@@ -802,11 +815,14 @@ impl PluginUiImpl {
             }
             RequestInner::RtcIce { nonce, ice } => {
                 let mut peer_connection = peer_connection.lock().await;
-                if let Some((current_nonce, peer_connection)) = &mut *peer_connection {
+                if let (Some((current_nonce, peer_connection)), Some(ice)) =
+                    (&mut *peer_connection, ice.as_ref())
+                {
                     if *current_nonce == nonce {
                         peer_connection
-                            .add_ice_candidate(serde_json::from_value(ice)?)
+                            .add_ice_candidate(serde_json::from_value(ice.clone())?)
                             .await?;
+                        info!("added ice candidate: {:?}", ice);
                         Ok(serde_json::Value::Null)
                     } else {
                         Err(anyhow::anyhow!("uuid mismatch"))
